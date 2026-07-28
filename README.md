@@ -157,7 +157,31 @@ Bundles land in `src-tauri/target/release/bundle/`.
 | `npm run build` | Typecheck (`tsc`) and build the front end |
 | `npm run dev` | Vite dev server alone, without the Tauri shell |
 | `npm run fetch-binaries -- --force` | Re-download the sidecars (e.g. to update `yt-dlp`) |
+| `npm run check-encoding` | Verify every tracked text file is plain UTF-8 (CI runs this too) |
 | `cargo fmt` / `cargo clippy --all-targets` | Format and lint the Rust core (run inside `src-tauri/`) |
+
+### Cutting a release
+
+Release notes are kept in the repo, one file per version, and the Release
+workflow publishes the file matching the `version` in `package.json`:
+
+```
+docs/release-notes/0.1.0.md   ->  the body of the v0.1.0 GitHub release
+```
+
+1. Bump `version` in `package.json` and `src-tauri/tauri.conf.json`.
+2. Write `docs/release-notes/<version>.md` (**UTF-8, no BOM** — see below).
+3. Tag as `v<version>` and push the tag; the workflow builds all four platforms
+   and opens a draft release with those notes attached.
+
+Write the notes as a file in the repo rather than pasting a body into the GitHub
+UI or piping one from a shell. On Windows, `>`, `>>`, `Out-File`, and
+`Set-Content` in **PowerShell 5.1 default to UTF-16LE**, which produces a body
+where every character is followed by a NUL byte. The GitHub web UI hides those
+NULs, but the GitHub mobile app renders them, so the notes look like gibberish
+there. `npm run check-encoding` catches this, and the release workflow fails
+rather than publishing a mis-encoded body. In PowerShell 7+, use
+`Set-Content -Encoding utf8NoBOM`.
 
 ## How the sidecars work
 
