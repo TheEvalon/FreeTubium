@@ -15,6 +15,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  encoding:
+    name: Text encoding check
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No npm install: the script only uses node builtins, so this stays fast.
+      - name: Check tracked files are plain UTF-8
+        run: npm run check-encoding
+
   frontend:
     name: Frontend typecheck & build
     runs-on: ubuntu-22.04
