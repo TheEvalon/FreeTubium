@@ -7,15 +7,13 @@ use crate::models::{AnalyzeResult, FormatInfo, PlaylistEntry, VideoInfo};
 use crate::ytdlp;
 
 pub async fn analyze(app: &AppHandle, url: &str) -> Result<AnalyzeResult, String> {
+    // `--flat-playlist` keeps playlist analysis to a single extraction pass.
+    // Resolving every entry in full instead costs one network round-trip per
+    // video (~30s and ~20MB of JSON for only 19 items), which makes larger
+    // playlists unusable. Single-video URLs are unaffected by the flag.
     let output = ytdlp::run_ytdlp(
         app,
-        &[
-            "-J",
-            "--no-flat-playlist",
-            "--no-warnings",
-            "--no-colors",
-            url,
-        ],
+        &["-J", "--flat-playlist", "--no-warnings", "--no-colors", url],
     )
     .await?;
 
@@ -35,7 +33,12 @@ pub async fn analyze(app: &AppHandle, url: &str) -> Result<AnalyzeResult, String
         let entries = json
             .get("entries")
             .and_then(Value::as_array)
-            .map(|arr| arr.iter().filter_map(parse_playlist_entry).collect())
+            .map(|arr| {
+                arr.iter()
+                    .enumerate()
+                    .filter_map(|(i, e)| parse_playlist_entry(e, i + 1))
+                    .collect()
+            })
             .unwrap_or_default();
 
         Ok(AnalyzeResult {
@@ -62,6 +65,18 @@ fn str_field(v: &Value, key: &str) -> Option<String> {
     v.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
+/// Best available thumbnail URL. Flat playlist entries carry no `thumbnail`
+/// field, only a `thumbnails` array ordered smallest to largest.
+fn thumbnail_url(v: &Value) -> Option<String> {
+    str_field(v, "thumbnail").or_else(|| {
+        v.get("thumbnails")
+            .and_then(Value::as_array)?
+            .iter()
+            .rev()
+            .find_map(|t| str_field(t, "url"))
+    })
+}
+
 fn parse_video(v: &Value, fallback_url: &str) -> VideoInfo {
     let formats = v
         .get("formats")
@@ -73,7 +88,7 @@ fn parse_video(v: &Value, fallback_url: &str) -> VideoInfo {
         id: str_field(v, "id").unwrap_or_default(),
         title: str_field(v, "title").unwrap_or_else(|| fallback_url.to_string()),
         url: str_field(v, "webpage_url").unwrap_or_else(|| fallback_url.to_string()),
-        thumbnail: str_field(v, "thumbnail"),
+        thumbnail: thumbnail_url(v),
         duration: v.get("duration").and_then(Value::as_f64),
         channel: str_field(v, "channel").or_else(|| str_field(v, "uploader")),
         upload_date: str_field(v, "upload_date"),
@@ -101,7 +116,7 @@ fn parse_format(v: &Value) -> Option<FormatInfo> {
     })
 }
 
-fn parse_playlist_entry(v: &Value) -> Option<PlaylistEntry> {
+fn parse_playlist_entry(v: &Value, position: usize) -> Option<PlaylistEntry> {
     // Entries can be null for unavailable/private videos.
     if v.is_null() {
         return None;
@@ -111,8 +126,13 @@ fn parse_playlist_entry(v: &Value) -> Option<PlaylistEntry> {
         title: str_field(v, "title").unwrap_or_else(|| "Unknown title".into()),
         url: str_field(v, "webpage_url").or_else(|| str_field(v, "url")),
         duration: v.get("duration").and_then(Value::as_f64),
-        thumbnail: str_field(v, "thumbnail"),
+        thumbnail: thumbnail_url(v),
         channel: str_field(v, "channel").or_else(|| str_field(v, "uploader")),
-        playlist_index: v.get("playlist_index").and_then(Value::as_u64),
+        // Flat entries omit `playlist_index`; fall back to array position so
+        // `--playlist-items` selections still line up with what the UI shows.
+        playlist_index: v
+            .get("playlist_index")
+            .and_then(Value::as_u64)
+            .or(Some(position as u64)),
     })
 }

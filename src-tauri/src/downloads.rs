@@ -7,7 +7,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
-use tauri_plugin_shell::ShellExt;
 use uuid::Uuid;
 
 use crate::models::{
@@ -82,6 +81,61 @@ pub fn enqueue(app: &AppHandle, request: DownloadRequest) -> String {
     id
 }
 
+/// Kills a sidecar process together with everything it spawned.
+///
+/// yt-dlp ships as a PyInstaller bundle: the executable we launch is only a
+/// bootstrapper that runs the real downloader as a child process. Terminating
+/// the bootstrapper alone leaves that child downloading in the background,
+/// still holding the inherited stdout pipe.
+fn kill_process_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+    }
+    #[cfg(not(windows))]
+    {
+        // Children first so they cannot outlive the bootstrapper.
+        let _ = std::process::Command::new("pkill")
+            .args(["-TERM", "-P", &pid.to_string()])
+            .output();
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output();
+    }
+}
+
+/// Emits the cancellation event and records it in history.
+fn report_cancelled(app: &AppHandle, id: &str, request: &DownloadRequest) {
+    let _ = app.emit(
+        EVENT_ERROR,
+        ErrorPayload {
+            id: id.to_string(),
+            message: "Cancelled".into(),
+            cancelled: true,
+        },
+    );
+    store::push_history(
+        app,
+        HistoryEntry {
+            id: id.to_string(),
+            url: request.url.clone(),
+            title: display_title(request),
+            thumbnail: request.thumbnail.clone(),
+            output_dir: request.output_dir.clone().unwrap_or_default(),
+            file_path: None,
+            status: DownloadStatus::Cancelled,
+            error: None,
+            audio_only: request.audio_only,
+            created_at: now_unix(),
+        },
+    );
+}
+
 /// Cancels a running or queued download.
 pub fn cancel(app: &AppHandle, id: &str) -> Result<(), String> {
     let state = app.state::<DownloadManagerState>();
@@ -90,39 +144,24 @@ pub fn cancel(app: &AppHandle, id: &str) -> Result<(), String> {
     if let Some(active) = inner.active.remove(id) {
         inner.cancelled.insert(id.to_string());
         drop(inner);
+        kill_process_tree(active.child.pid());
         active
             .child
             .kill()
             .map_err(|e| format!("failed to kill download process: {e}"))?;
+        // Report the outcome now instead of waiting for the reader task.
+        // Killing yt-dlp does not necessarily close its stdout: a merging ffmpeg
+        // grandchild inherits the pipe and can hold it open for minutes, which
+        // used to leave the card stuck on "Downloading" with nothing in history.
+        report_cancelled(app, id, &active.request);
+        pump(app);
         return Ok(());
     }
 
     if let Some(pos) = inner.queue.iter().position(|p| p.id == id) {
         let pending = inner.queue.remove(pos).unwrap();
         drop(inner);
-        let _ = app.emit(
-            EVENT_ERROR,
-            ErrorPayload {
-                id: id.to_string(),
-                message: "Cancelled".into(),
-                cancelled: true,
-            },
-        );
-        store::push_history(
-            app,
-            HistoryEntry {
-                id: id.to_string(),
-                url: pending.request.url.clone(),
-                title: display_title(&pending.request),
-                thumbnail: pending.request.thumbnail.clone(),
-                output_dir: pending.request.output_dir.clone().unwrap_or_default(),
-                file_path: None,
-                status: DownloadStatus::Cancelled,
-                error: None,
-                audio_only: pending.request.audio_only,
-                created_at: now_unix(),
-            },
-        );
+        report_cancelled(app, id, &pending.request);
         return Ok(());
     }
 
@@ -233,10 +272,7 @@ fn spawn_download(app: &AppHandle, pending: &Pending) -> Result<CommandChild, St
     };
     let args = build_args(&pending.request, &settings);
 
-    let (mut rx, child) = app
-        .shell()
-        .sidecar("yt-dlp")
-        .map_err(|e| format!("yt-dlp sidecar not available: {e}"))?
+    let (mut rx, child) = ytdlp::command(app)?
         .args(&args)
         .spawn()
         .map_err(|e| format!("failed to spawn yt-dlp: {e}"))?;
@@ -287,9 +323,21 @@ fn spawn_download(app: &AppHandle, pending: &Pending) -> Result<CommandChild, St
     Ok(child)
 }
 
+/// True once `cancel` has finalized this id, so late output must be ignored.
+fn is_cancelled(app: &AppHandle, id: &str) -> bool {
+    let state = app.state::<DownloadManagerState>();
+    let inner = state.0.lock().unwrap();
+    inner.cancelled.contains(id)
+}
+
 fn handle_stdout_line(app: &AppHandle, id: &str, line: &str, file_path: &mut Option<String>) {
     let line = line.trim();
     if let Some(rest) = line.strip_prefix(PROGRESS_MARKER) {
+        // A cancelled download is already reported as such; any output that
+        // still trickles in must not flip its card back to "downloading".
+        if is_cancelled(app, id) {
+            return;
+        }
         let mut parts = rest.split('|');
         let percent = parts
             .next()
@@ -328,18 +376,18 @@ fn finish_download(
         inner.cancelled.remove(id)
     };
 
-    let output_dir = request
-        .output_dir
-        .clone()
-        .unwrap_or_else(|| {
-            let state = app.state::<SettingsState>();
-            let s = state.0.lock().unwrap();
-            s.output_dir.clone()
-        });
+    // `cancel` already emitted the event and wrote the history entry.
+    if was_cancelled {
+        return;
+    }
 
-    let (status, error) = if was_cancelled {
-        (DownloadStatus::Cancelled, None)
-    } else if exit_code == Some(0) {
+    let output_dir = request.output_dir.clone().unwrap_or_else(|| {
+        let state = app.state::<SettingsState>();
+        let s = state.0.lock().unwrap();
+        s.output_dir.clone()
+    });
+
+    let (status, error) = if exit_code == Some(0) {
         (DownloadStatus::Completed, None)
     } else {
         let message = if stderr_tail.is_empty() {
@@ -350,36 +398,23 @@ fn finish_download(
         (DownloadStatus::Error, Some(message))
     };
 
-    match status {
-        DownloadStatus::Completed => {
-            let _ = app.emit(
-                EVENT_DONE,
-                DonePayload {
-                    id: id.to_string(),
-                    file_path: file_path.clone(),
-                },
-            );
-        }
-        DownloadStatus::Cancelled => {
-            let _ = app.emit(
-                EVENT_ERROR,
-                ErrorPayload {
-                    id: id.to_string(),
-                    message: "Cancelled".into(),
-                    cancelled: true,
-                },
-            );
-        }
-        _ => {
-            let _ = app.emit(
-                EVENT_ERROR,
-                ErrorPayload {
-                    id: id.to_string(),
-                    message: error.clone().unwrap_or_default(),
-                    cancelled: false,
-                },
-            );
-        }
+    if status == DownloadStatus::Completed {
+        let _ = app.emit(
+            EVENT_DONE,
+            DonePayload {
+                id: id.to_string(),
+                file_path: file_path.clone(),
+            },
+        );
+    } else {
+        let _ = app.emit(
+            EVENT_ERROR,
+            ErrorPayload {
+                id: id.to_string(),
+                message: error.clone().unwrap_or_default(),
+                cancelled: false,
+            },
+        );
     }
 
     store::push_history(

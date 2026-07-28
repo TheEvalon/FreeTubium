@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { forwardRef, type ReactNode } from "react";
 
 import { cn } from "../lib/cn";
 import { formatEta, formatSpeed } from "../lib/format";
@@ -50,15 +50,7 @@ const STATUS_META: Record<
   cancelled: { label: "Cancelled", tone: "neutral", icon: <X className="size-3" /> },
 };
 
-export function QueueCard({
-  item,
-  onPause,
-  onResume,
-  onCancel,
-  onRetry,
-  onDismiss,
-  onReveal,
-}: {
+interface QueueCardProps {
   item: DownloadItem;
   onPause: () => void;
   onResume: () => void;
@@ -66,7 +58,14 @@ export function QueueCard({
   onRetry: () => void;
   onDismiss: () => void;
   onReveal: () => void;
-}) {
+}
+
+// forwardRef so `AnimatePresence mode="popLayout"` can measure the card while
+// it animates out.
+export const QueueCard = forwardRef<HTMLDivElement, QueueCardProps>(function QueueCard(
+  { item, onPause, onResume, onCancel, onRetry, onDismiss, onReveal },
+  ref,
+) {
   const meta = STATUS_META[item.status];
   const speed = formatSpeed(item.speed);
   const eta = formatEta(item.eta);
@@ -78,6 +77,7 @@ export function QueueCard({
 
   return (
     <motion.div
+      ref={ref}
       layout
       initial={{ opacity: 0, y: 12, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -189,4 +189,4 @@ export function QueueCard({
       </div>
     </motion.div>
   );
-}
+});
