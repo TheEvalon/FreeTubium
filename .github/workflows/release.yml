@@ -118,6 +118,52 @@ jobs:
             echo "found $file"
           done
 
+      # Release notes live in the repo as UTF-8 so they cannot be mangled by a
+      # hand-pasted body. Windows PowerShell's `>` and `Out-File` default to
+      # UTF-16LE, and a UTF-16 body renders as NUL-interleaved gibberish in the
+      # GitHub mobile app.
+      - name: Resolve release notes
+        id: notes
+        shell: bash
+        run: |
+          # Keyed on the built version rather than the tag, because the notes
+          # name the bundle filenames and those come from package.json.
+          version="$(node -p "require('./package.json').version")"
+          file="docs/release-notes/${version}.md"
+
+          if [ -f "$file" ]; then
+            echo "Publishing release notes from $file"
+            # Fail the release rather than ship mojibake if the notes file
+            # itself is mis-encoded.
+            node scripts/check-encoding.mjs "$file"
+          else
+            echo "::warning::No docs/release-notes/${version}.md; using the generic body"
+            file=""
+          fi
+
+          delimiter="notes-$RANDOM$RANDOM"
+          {
+            echo "body<<$delimiter"
+            if [ -n "$file" ]; then
+              cat "$file"
+            else
+              cat <<'FALLBACK'
+          Download the installer for your platform below.
+
+          | Platform | File |
+          | --- | --- |
+          | Windows | `.exe` (NSIS installer) or `.msi` |
+          | macOS (Apple Silicon) | `*_aarch64.dmg` |
+          | macOS (Intel) | `*_x64.dmg` |
+          | Linux | `.AppImage` or `.deb` |
+
+          The builds are not code-signed, so Windows SmartScreen and macOS
+          Gatekeeper will warn on first launch.
+          FALLBACK
+            fi
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build app and upload to release
         id: tauri
         uses: tauri-apps/tauri-action@v0
@@ -128,18 +174,7 @@ jobs:
         with:
           tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
           releaseName: FreeTubium ${{ github.ref_name }}
-          releaseBody: |
-            Download the installer for your platform below.
-
-            | Platform | File |
-            | --- | --- |
-            | Windows | `.exe` (NSIS installer) or `.msi` |
-            | macOS (Apple Silicon) | `*_aarch64.dmg` |
-            | macOS (Intel) | `*_x64.dmg` |
-            | Linux | `.AppImage` or `.deb` |
-
-            The builds are not code-signed, so Windows SmartScreen and macOS
-            Gatekeeper will warn on first launch.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: false
