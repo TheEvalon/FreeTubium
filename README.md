@@ -208,6 +208,13 @@ The binaries are deliberately **not** committed to git — they are large and
 platform-specific, so `src-tauri/binaries/` is in `.gitignore` and CI fetches
 them on every run.
 
+Because the builds come from third-party hosts that go down without warning,
+each download is retried with backoff, and ffmpeg on Linux has a second source:
+the fully static [johnvansickle](https://johnvansickle.com/ffmpeg/) build is
+preferred (no glibc dependency, which matters for the `.deb` and `.AppImage`),
+falling back to the GitHub-hosted [BtbN](https://github.com/BtbN/FFmpeg-Builds)
+build when that host is unreachable.
+
 Because `yt-dlp` needs regular updates to keep up with site changes, Settings has
 a **Update yt-dlp** button that runs the bundled binary's own self-update.
 
