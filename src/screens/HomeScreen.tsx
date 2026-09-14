@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { DownloadOptions } from "../components/DownloadOptions";
 import { PlaylistPicker } from "../components/PlaylistPicker";
+import { SignInHint } from "../components/SignInHint";
 import { VideoCard } from "../components/VideoCard";
 import { Button, IconButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
@@ -340,6 +341,7 @@ export function HomeScreen({ onQueued }: { onQueued: () => void }) {
                 <p className="mt-1 text-xs leading-relaxed break-words text-ink-muted">
                   {error}
                 </p>
+                <SignInHint message={error} className="mt-2.5" />
               </div>
               <IconButton label="Try again" onClick={handleAnalyze}>
                 <RotateCcw className="size-4" />

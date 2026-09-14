@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { SignInHint } from "../components/SignInHint";
 import { LocalPlayer } from "../components/watch/LocalPlayer";
 import { PlaylistQueue } from "../components/watch/PlaylistQueue";
 import { YouTubeEmbed } from "../components/watch/YouTubeEmbed";
@@ -165,10 +166,13 @@ export function WatchScreen() {
         </div>
 
         {analyzeError ? (
-          <p className="flex items-start gap-1.5 text-xs text-negative">
-            <AlertTriangle className="mt-0.5 size-3 shrink-0" />
-            {analyzeError}
-          </p>
+          <div className="flex flex-col gap-2">
+            <p className="flex items-start gap-1.5 text-xs text-negative">
+              <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+              {analyzeError}
+            </p>
+            <SignInHint message={analyzeError} />
+          </div>
         ) : null}
       </Card>
 
