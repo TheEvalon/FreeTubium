@@ -25,7 +25,7 @@ export const DOWNLOAD_EVENTS = {
 export const WATCH_EVENTS = {
   /** Emitted while ffmpeg prepares a video for the local player. Payload: {@link PrepareProgressPayload} */
   prepareProgress: "watch://prepare-progress",
-  /** Emitted when a prepared file is complete and playable. Payload: the session id. */
+  /** Emitted when a prepared file is complete and playable. Payload: {@link PrepareReadyPayload} */
   prepareReady: "watch://prepare-ready",
   /** Emitted when preparation fails. Payload: {@link PrepareErrorPayload} */
   prepareError: "watch://prepare-error",
@@ -224,23 +224,19 @@ export interface AuthStatus {
 
 // ---------- watch types ----------
 
-export interface StreamInfo {
-  /** Identifies the preparation job, for cancellation and cleanup */
-  sessionId: string;
-  /** Absolute path of the prepared MP4; load it with `convertFileSrc` */
-  playbackPath: string;
-  videoId: string;
-  title: string;
-  /** Duration in seconds */
-  duration: number | null;
-  /** Height of the selected video rendition */
-  height: number | null;
-}
-
 export interface PrepareProgressPayload {
   sessionId: string;
-  /** 0–100 */
+  /**
+   * 0–100 for the rendition currently downloading. Video and audio arrive as
+   * separate downloads, so this restarts once before the merge.
+   */
   percent: number;
+}
+
+export interface PrepareReadyPayload {
+  sessionId: string;
+  /** Absolute path of the prepared MP4; load it with `convertFileSrc` */
+  path: string;
 }
 
 export interface PrepareErrorPayload {
@@ -391,14 +387,11 @@ export function clearYoutubeAuth(): Promise<AuthStatus> {
 // ---------- watch commands ----------
 
 /**
- * Starts preparing a video for the local player and resolves once the output
- * path is known. Wait for {@link onPrepareReady} before playing; progress
- * arrives on {@link onPrepareProgress}.
+ * Starts preparing a video for the local player and resolves with the session
+ * id. Wait for {@link onPrepareReady}, which carries the finished file's path;
+ * progress arrives on {@link onPrepareProgress}.
  */
-export function prepareStream(
-  url: string,
-  quality?: Quality,
-): Promise<StreamInfo> {
+export function prepareStream(url: string, quality?: Quality): Promise<string> {
   return invoke("prepare_stream", { url, quality });
 }
 
@@ -458,9 +451,11 @@ export function onPrepareProgress(
 }
 
 export function onPrepareReady(
-  handler: (sessionId: string) => void,
+  handler: (payload: PrepareReadyPayload) => void,
 ): Promise<UnlistenFn> {
-  return listen<string>(WATCH_EVENTS.prepareReady, (e) => handler(e.payload));
+  return listen<PrepareReadyPayload>(WATCH_EVENTS.prepareReady, (e) =>
+    handler(e.payload),
+  );
 }
 
 export function onPrepareError(

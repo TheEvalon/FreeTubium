@@ -18,7 +18,6 @@ import {
   prepareStream,
   stopStream,
   type AnalyzeResult,
-  type StreamInfo,
 } from "../lib/api";
 import { normalizeUrl } from "../lib/clipboard";
 import { shortErrorMessage } from "../lib/errors";
@@ -143,14 +142,12 @@ export function WatchProvider({ children }: { children: ReactNode }) {
   const session = useRef<string | null>(null);
   /** Guards against a slow preparation landing after the user moved on. */
   const prepareId = useRef(0);
-  /** Output path reported by `prepare_stream`, needed when "ready" arrives. */
-  const pendingPath = useRef<string | null>(null);
   /**
-   * ffmpeg can finish before `prepare_stream` has even returned the session id
-   * for a short video, so outcomes that arrive early are held here and applied
-   * once the session is known.
+   * A short video can finish before `prepare_stream` has even returned its
+   * session id, so outcomes that arrive early are held here and applied once the
+   * session is known.
    */
-  const earlyReady = useRef<Set<string>>(new Set());
+  const earlyReady = useRef<Map<string, string>>(new Map());
   const earlyError = useRef<Map<string, string>>(new Map());
 
   const current = queue[index] ?? null;
@@ -205,16 +202,12 @@ export function WatchProvider({ children }: { children: ReactNode }) {
     );
 
     track(
-      onPrepareReady((sessionId) => {
+      onPrepareReady(({ sessionId, path }) => {
         if (sessionId !== session.current) {
-          earlyReady.current.add(sessionId);
+          earlyReady.current.set(sessionId, path);
           return;
         }
-        setPrepare((state) =>
-          state.status === "preparing" && pendingPath.current
-            ? { status: "ready", path: pendingPath.current }
-            : state,
-        );
+        setPrepare({ status: "ready", path });
       }),
     );
 
@@ -238,12 +231,11 @@ export function WatchProvider({ children }: { children: ReactNode }) {
     async (item: WatchItem) => {
       const attempt = ++prepareId.current;
       releaseSession();
-      pendingPath.current = null;
       setPrepare({ status: "preparing", percent: 0 });
 
-      let info: StreamInfo;
+      let sessionId: string;
       try {
-        info = await prepareStream(item.url, settings.watchQuality);
+        sessionId = await prepareStream(item.url, settings.watchQuality);
       } catch (error) {
         if (prepareId.current === attempt) {
           setPrepare({ status: "error", message: shortErrorMessage(error) });
@@ -252,19 +244,20 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       }
 
       if (prepareId.current !== attempt) {
-        // The user moved on while yt-dlp was still resolving.
-        void stopStream(info.sessionId).catch(() => undefined);
+        // The user moved on while yt-dlp was still starting up.
+        void stopStream(sessionId).catch(() => undefined);
         return;
       }
-      session.current = info.sessionId;
-      pendingPath.current = info.playbackPath;
+      session.current = sessionId;
 
-      const failure = earlyError.current.get(info.sessionId);
+      const failure = earlyError.current.get(sessionId);
+      const readyPath = earlyReady.current.get(sessionId);
       if (failure !== undefined) {
-        earlyError.current.delete(info.sessionId);
+        earlyError.current.delete(sessionId);
         setPrepare({ status: "error", message: failure });
-      } else if (earlyReady.current.delete(info.sessionId)) {
-        setPrepare({ status: "ready", path: info.playbackPath });
+      } else if (readyPath !== undefined) {
+        earlyReady.current.delete(sessionId);
+        setPrepare({ status: "ready", path: readyPath });
       }
     },
     [releaseSession, settings.watchQuality],

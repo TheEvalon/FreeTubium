@@ -246,28 +246,22 @@ pub struct AuthStatus {
 
 // ---------- watch ----------
 
-/// A video prepared for the Watch page's local player.
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StreamInfo {
-    /// Identifies the preparation job, so it can be cancelled and cleaned up.
-    pub session_id: String,
-    /// Absolute path of the prepared MP4. The UI turns this into a URL the
-    /// webview can load with Tauri's `convertFileSrc`.
-    pub playback_path: String,
-    pub video_id: String,
-    pub title: String,
-    pub duration: Option<f64>,
-    /// Height of the selected video rendition, when known.
-    pub height: Option<u32>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrepareProgressPayload {
     pub session_id: String,
-    /// 0-100, based on how much of the duration ffmpeg has written.
+    /// 0-100 for the rendition currently downloading. Video and audio arrive as
+    /// separate downloads, so this restarts once before the merge.
     pub percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareReadyPayload {
+    pub session_id: String,
+    /// Absolute path of the prepared MP4. The UI turns this into a URL the
+    /// webview can load with Tauri's `convertFileSrc`.
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

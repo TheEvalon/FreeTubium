@@ -246,13 +246,18 @@ cannot see; each of those switches that one queue item — and only that item �
 the local player, which extracts the video with `yt-dlp`.
 
 The local player has to combine streams before it can play anything. YouTube no
-longer offers a single format containing both video and audio, so every
-rendition is video-only or audio-only. The bundled ffmpeg copies one of each into
-an MP4 (`-c copy`, no re-encoding) and the webview plays that file through
-Tauri's asset protocol. An MP4 is not playable until its index has been written,
-so playback waits for the whole file — the trade is a wait up front in exchange
-for a video that is seekable end to end. Prepared files live in the app cache
-directory and are deleted when you move on, and on startup.
+longer offers a single format containing both video and audio, so every rendition
+is video-only or audio-only. Preparation downloads one of each and merges them
+into an MP4 without re-encoding, preferring H.264 video with AAC audio because
+that combination plays reliably in all three system webviews. The webview then
+plays the file through Tauri's asset protocol, which serves range requests, so
+the video is seekable end to end. Prepared files live in the app cache directory
+and are deleted when you move on, and on startup.
+
+`yt-dlp` does the downloading and ffmpeg only ever merges local files — the same
+division of labour as the download path. That is not just for consistency: the
+Linux ffmpeg build is statically linked, which leaves it unable to resolve
+hostnames, and it crashes outright if handed an http URL.
 
 ## Using a YouTube account
 
