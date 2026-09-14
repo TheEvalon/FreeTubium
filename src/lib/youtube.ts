@@ -55,22 +55,52 @@ export function watchUrlFor(videoId: string): string {
 }
 
 /**
- * Whether a yt-dlp failure looks like it needs a signed-in account.
+ * Why a yt-dlp failure points at the YouTube account settings.
  *
- * YouTube rotates cookies and can invalidate a captured session at any time, so
- * this is also how the app knows to suggest capturing cookies again rather than
- * leaving the user with a bare extraction error.
+ * `"signin"` means the content itself needs an account. YouTube also rotates
+ * cookies and can invalidate a captured session at any time, so this covers
+ * re-capturing as much as setting up for the first time.
+ *
+ * `"cookies"` means the chosen cookie source is broken rather than missing —
+ * a browser whose store yt-dlp cannot read, which is the documented state of
+ * Chrome 127 and later, or a file that is not in Netscape format. Both are
+ * fixed in the same place, but telling someone to sign in when they already
+ * did would send them in a circle.
  */
-export function needsAuthentication(message: string): boolean {
-  return [
-    /sign in to confirm/i,
-    /confirm your age/i,
-    /age-?restricted/i,
-    /members-only/i,
-    /private video/i,
-    /this video is available to this channel's members/i,
-    /use --cookies/i,
-    /cookies are no longer valid/i,
-    /account.*(cookies|sign)/i,
-  ].some((pattern) => pattern.test(message));
+export type AuthProblem = "signin" | "cookies";
+
+const SIGN_IN_PATTERNS = [
+  /sign in to confirm/i,
+  /confirm your age/i,
+  /age-?restricted/i,
+  /members-only/i,
+  /private video/i,
+  /this video is available to this channel's members/i,
+  /use --cookies/i,
+  /cookies are no longer valid/i,
+  /account.*(cookies|sign)/i,
+];
+
+const COOKIE_SOURCE_PATTERNS = [
+  /could not find .*cookies database/i,
+  /could not (copy|read|open|decrypt) .*cookie/i,
+  /failed to decrypt .*cookie/i,
+  /unsupported browser/i,
+  /netscape format/i,
+  /cookie(s)? (file|database).*(invalid|malformed|not)/i,
+];
+
+export function authProblem(
+  message: string | null | undefined,
+): AuthProblem | null {
+  if (!message) return null;
+  // The cookie-source check runs first: those failures often also mention
+  // cookies in a way the sign-in patterns would claim.
+  if (COOKIE_SOURCE_PATTERNS.some((pattern) => pattern.test(message))) {
+    return "cookies";
+  }
+  if (SIGN_IN_PATTERNS.some((pattern) => pattern.test(message))) {
+    return "signin";
+  }
+  return null;
 }
