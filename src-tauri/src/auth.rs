@@ -46,14 +46,26 @@ fn cookies_path(app: &AppHandle) -> Result<PathBuf, String> {
 /// is off. Shared by analyze, download and watch so signing in once applies
 /// everywhere.
 pub fn args_for(app: &AppHandle, settings: &Settings) -> Vec<String> {
-    match settings.auth_mode.as_str() {
-        "file" => match cookies_path(app) {
-            Ok(path) if path.exists() => {
-                vec!["--cookies".into(), path.to_string_lossy().into_owned()]
-            }
-            _ => Vec::new(),
+    let cookie_file = cookies_path(app).ok().filter(|path| path.exists());
+    select_args(
+        &settings.auth_mode,
+        settings.cookies_browser.as_deref(),
+        cookie_file.as_deref(),
+    )
+}
+
+/// The argument choice itself, separated from resolving where cookies live.
+///
+/// Every branch can come up empty — an unreadable cookie file or an unknown
+/// browser name — and that deliberately degrades to an unauthenticated call
+/// rather than failing, so signed-out content keeps working.
+fn select_args(mode: &str, browser: Option<&str>, cookie_file: Option<&Path>) -> Vec<String> {
+    match mode {
+        "file" => match cookie_file {
+            Some(path) => vec!["--cookies".into(), path.to_string_lossy().into_owned()],
+            None => Vec::new(),
         },
-        "browser" => match settings.cookies_browser.as_deref() {
+        "browser" => match browser {
             Some(browser) if SUPPORTED_BROWSERS.contains(&browser) => {
                 vec!["--cookies-from-browser".into(), browser.to_string()]
             }
@@ -350,4 +362,127 @@ pub fn clear_youtube_auth(app: AppHandle) -> Result<AuthStatus, String> {
         settings.auth_mode = "none".into();
         settings.cookies_browser = None;
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    fn field(name: &str, value: &str, http_only: bool, expires: Option<u64>) -> CookieFields {
+        CookieFields {
+            domain: ".youtube.com".into(),
+            path: "/".into(),
+            secure: true,
+            http_only,
+            expires,
+            name: name.into(),
+            value: value.into(),
+        }
+    }
+
+    /// This exact layout is what yt-dlp accepts; a stray space instead of a tab,
+    /// or a missing `#HttpOnly_` prefix, silently loses the session cookies.
+    #[test]
+    fn netscape_output_marks_http_only_and_session_cookies() {
+        let cookies = vec![
+            (
+                "a".to_string(),
+                field("__Secure-3PSID", "secret", true, Some(1_799_999_999)),
+            ),
+            ("b".to_string(), field("PREF", "f1=50", false, None)),
+        ];
+        let text = to_netscape(&cookies);
+        let lines: Vec<&str> = text.lines().collect();
+
+        assert_eq!(lines[0], "# Netscape HTTP Cookie File");
+        assert_eq!(
+            lines[3],
+            "#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t1799999999\t__Secure-3PSID\tsecret"
+        );
+        // A session cookie has no expiry, which this format writes as 0.
+        assert_eq!(lines[4], ".youtube.com\tTRUE\t/\tTRUE\t0\tPREF\tf1=50");
+    }
+
+    #[test]
+    fn a_cookie_file_round_trips_through_inspection() {
+        let dir = std::env::temp_dir().join(format!("ft-auth-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cookies.txt");
+
+        let cookies = vec![
+            (
+                "a".to_string(),
+                field("__Secure-3PSID", "secret", true, Some(2_000)),
+            ),
+            ("b".to_string(), field("SAPISID", "secret", true, Some(1_000))),
+            ("c".to_string(), field("PREF", "f1=50", false, None)),
+        ];
+        fs::write(&path, to_netscape(&cookies)).unwrap();
+
+        let (count, signed_in, expires_at) = inspect_cookie_file(&path);
+        assert_eq!(count, 3, "comment lines must not be counted as cookies");
+        assert!(signed_in);
+        // The earliest session-cookie expiry is the one that matters.
+        assert_eq!(expires_at, Some(1_000));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cookies_without_a_session_are_not_signed_in() {
+        let dir = std::env::temp_dir().join(format!("ft-auth-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("cookies.txt");
+        fs::write(
+            &path,
+            to_netscape(&[("a".to_string(), field("PREF", "f1=50", false, None))]),
+        )
+        .unwrap();
+
+        let (count, signed_in, _) = inspect_cookie_file(&path);
+        assert_eq!(count, 1);
+        assert!(!signed_in);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_cookie_file_reports_no_cookies() {
+        let dir = std::env::temp_dir().join(format!("ft-auth-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("notes.txt");
+        fs::write(&path, "just some text\nand another line\n").unwrap();
+
+        assert_eq!(inspect_cookie_file(&path).0, 0);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn signed_out_passes_no_cookie_arguments() {
+        assert!(select_args("none", Some("firefox"), Some(Path::new("/c.txt"))).is_empty());
+    }
+
+    #[test]
+    fn file_mode_needs_the_file_to_exist() {
+        assert_eq!(
+            select_args("file", None, Some(Path::new("/c.txt"))),
+            vec!["--cookies".to_string(), "/c.txt".to_string()]
+        );
+        assert!(select_args("file", None, None).is_empty());
+    }
+
+    #[test]
+    fn browser_mode_rejects_unknown_browsers() {
+        assert_eq!(
+            select_args("browser", Some("firefox"), None),
+            vec![
+                "--cookies-from-browser".to_string(),
+                "firefox".to_string()
+            ]
+        );
+        assert!(select_args("browser", Some("netscape"), None).is_empty());
+        assert!(select_args("browser", None, None).is_empty());
+    }
 }
