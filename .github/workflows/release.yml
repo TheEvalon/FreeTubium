@@ -3,7 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      # Releases here are tagged without a `v` (0.1, 0.2.0), which the previous
+      # `v*` filter never matched, so tagging silently produced no release at
+      # all. Both conventions are accepted now rather than relying on one.
+      - "[0-9]*"
+      - "v[0-9]*"
   workflow_dispatch:
 
 permissions:
@@ -172,16 +176,18 @@ jobs:
           # linuxdeploy chokes on stripping the bundled static ffmpeg.
           NO_STRIP: ${{ startsWith(matrix.os, 'ubuntu') && 'true' || '' }}
         with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          # Empty on a workflow_dispatch run, which builds the bundles and
+          # uploads them as artifacts without touching the Releases page.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: FreeTubium ${{ github.ref_name }}
           releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           includeUpdaterJson: false
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Upload bundles as workflow artifacts
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
         with:
           name: freetubium-${{ matrix.label }}
