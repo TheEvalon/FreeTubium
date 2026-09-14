@@ -1,6 +1,6 @@
 [package]
 name = "freetubium"
-version = "0.1.0"
+version = "0.2.0"
 description = "FreeTubium — a modern cross-platform video downloader powered by yt-dlp"
 authors = ["TheEvalon"]
 edition = "2021"
