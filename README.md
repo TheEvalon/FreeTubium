@@ -238,7 +238,9 @@ YouTube directly, so views and ads count normally and FreeTubium does nothing
 clever. It is hosted in an iframe served from `127.0.0.1` rather than pointed at
 YouTube from the app window: YouTube requires an HTTP `Referer` and shows its
 blocked-playback screen (error 153) without one, and the app itself is served
-from a custom `tauri://` scheme that cannot provide one.
+from a custom `tauri://` scheme that cannot provide one. That loopback server
+answers only tokenised paths, so no other process on the machine can drive the
+player or read what you are watching.
 
 **The local player** handles what the embed refuses. YouTube reports error 101
 or 150 for videos whose uploader disallowed embedding, and 100 for videos it
@@ -249,10 +251,16 @@ The local player has to combine streams before it can play anything. YouTube no
 longer offers a single format containing both video and audio, so every rendition
 is video-only or audio-only. Preparation downloads one of each and merges them
 into an MP4 without re-encoding, preferring H.264 video with AAC audio because
-that combination plays reliably in all three system webviews. The webview then
-plays the file through Tauri's asset protocol, which serves range requests, so
-the video is seekable end to end. Prepared files live in the app cache directory
-and are deleted when you move on, and on startup.
+that combination plays reliably in all three system webviews. Prepared files
+live in the app cache directory and are deleted when you move on, and on startup.
+
+Playback goes over the same loopback server as the embed, with byte-range
+support so the video is seekable end to end. Tauri's asset protocol would be the
+obvious choice and is not usable here: WebKitGTK hands media to GStreamer, which
+accepts only `blob`, `data`, `file`, `http` and `https`, so an `asset://` URL can
+never drive a `<video>` on Linux ([WebKit
+146351](https://bugs.webkit.org/show_bug.cgi?id=146351)). `http` works on every
+platform.
 
 `yt-dlp` does the downloading and ffmpeg only ever merges local files — the same
 division of labour as the download path. That is not just for consistency: the
@@ -304,7 +312,7 @@ React UI  ──invoke──▶  Rust core  ──spawn──▶  yt-dlp  ──
   - `downloads.rs` — the download queue, concurrency, progress parsing, cancellation
   - `auth.rs` — YouTube cookies, shared by analyze, download and watch
   - `watch.rs` — picks renditions and remuxes them for the local player
-  - `player_server.rs` — serves the YouTube embed's host page from `127.0.0.1`
+  - `player_server.rs` — serves the embed's host page and prepared files from `127.0.0.1`
   - `store.rs` — settings and history persisted as JSON in the app config directory
   - `ytdlp.rs` — sidecar plumbing
 
