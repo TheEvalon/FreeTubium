@@ -16,6 +16,7 @@ import { forwardRef, type ReactNode } from "react";
 
 import { cn } from "../lib/cn";
 import { formatEta, formatSpeed } from "../lib/format";
+import { needsAuthentication } from "../lib/youtube";
 import type { DownloadItem, QueueStatus } from "../state/downloads";
 import { Badge } from "./ui/Badge";
 import { Button, IconButton } from "./ui/Button";
@@ -185,6 +186,13 @@ export const QueueCard = forwardRef<HTMLDivElement, QueueCardProps>(function Que
               ) : null}
             </div>
           </div>
+
+          {item.status === "error" && item.error && needsAuthentication(item.error) ? (
+            <p className="mt-1.5 text-[0.7rem] leading-relaxed text-warning">
+              This video needs a signed-in account. Set one up under Settings →
+              YouTube account.
+            </p>
+          ) : null}
         </div>
       </div>
     </motion.div>

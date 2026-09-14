@@ -2,6 +2,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { AlertTriangle, RotateCcw } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
+import { needsAuthentication } from "../../lib/youtube";
 import type { PrepareState } from "../../state/watch";
 import { Button } from "../ui/Button";
 import { ProgressBar } from "../ui/ProgressBar";
@@ -54,6 +55,12 @@ export function LocalPlayer({
           <p className="mx-auto mt-1 max-w-md text-xs leading-relaxed text-white/70">
             {prepare.message}
           </p>
+          {needsAuthentication(prepare.message) ? (
+            <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-warning">
+              This needs a signed-in account. Set one up under Settings →
+              YouTube account, or capture your cookies again if you already did.
+            </p>
+          ) : null}
         </div>
         <Button
           size="sm"

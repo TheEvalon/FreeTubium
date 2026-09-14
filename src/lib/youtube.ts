@@ -53,3 +53,24 @@ export function youtubeVideoId(url: string): string | null {
 export function watchUrlFor(videoId: string): string {
   return `https://www.youtube.com/watch?v=${videoId}`;
 }
+
+/**
+ * Whether a yt-dlp failure looks like it needs a signed-in account.
+ *
+ * YouTube rotates cookies and can invalidate a captured session at any time, so
+ * this is also how the app knows to suggest capturing cookies again rather than
+ * leaving the user with a bare extraction error.
+ */
+export function needsAuthentication(message: string): boolean {
+  return [
+    /sign in to confirm/i,
+    /confirm your age/i,
+    /age-?restricted/i,
+    /members-only/i,
+    /private video/i,
+    /this video is available to this channel's members/i,
+    /use --cookies/i,
+    /cookies are no longer valid/i,
+    /account.*(cookies|sign)/i,
+  ].some((pattern) => pattern.test(message));
+}

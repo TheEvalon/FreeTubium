@@ -6,15 +6,18 @@ import {
   FolderOpen,
   Gauge,
   Info,
+  MonitorPlay,
   Moon,
   Package,
   RefreshCw,
   Sun,
   Terminal,
   Type,
+  UserRound,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { YouTubeAccount } from "../components/settings/YouTubeAccount";
 import { Button, IconButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import {
@@ -419,6 +422,47 @@ export function SettingsScreen() {
             onChange={(checked) => update({ clipboardWatcher: checked })}
           />
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<MonitorPlay className="size-4" />}
+        title="Watch"
+        description="In-app playback. Videos YouTube's player refuses fall back to a local player that extracts them with yt-dlp."
+      >
+        <Field
+          label="Local player quality"
+          hint="Only applies to the local player; YouTube's own player picks its own quality. Higher settings take longer to prepare."
+        >
+          <div>
+            <SegmentedControl
+              layoutId="settings-watch-quality"
+              value={settings.watchQuality}
+              onChange={(value) => update({ watchQuality: value as Quality })}
+              segments={defaultQualityOptions().map((option) => ({
+                value: (option.quality ?? "best") as Quality,
+                label: option.label,
+                hint: option.hint,
+              }))}
+            />
+          </div>
+        </Field>
+        <div className="flex items-start gap-2 rounded-xl border border-hairline bg-canvas-soft/60 p-3">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-ink-faint" />
+          <p className="text-xs leading-relaxed text-ink-muted">
+            YouTube no longer offers formats with video and audio in one stream,
+            so the local player combines them with the bundled ffmpeg before
+            playback starts. That means a wait up front, and the whole video is
+            seekable once it begins.
+          </p>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<UserRound className="size-4" />}
+        title="YouTube account"
+        description="Optional. Signing in lets yt-dlp reach age-restricted, members-only and private videos, for downloads as well as the Watch page."
+      >
+        <YouTubeAccount />
       </SettingsSection>
 
       <SettingsSection
