@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import {
   ArrowDownToLine,
   History,
+  MonitorPlay,
   Moon,
   Plus,
   Settings as SettingsIcon,
@@ -15,6 +16,7 @@ import { useSettings } from "../state/settings";
 
 const NAV: Array<{ route: Route; label: string; icon: typeof Plus }> = [
   { route: "home", label: "New download", icon: Plus },
+  { route: "watch", label: "Watch", icon: MonitorPlay },
   { route: "queue", label: "Downloads", icon: ArrowDownToLine },
   { route: "history", label: "History", icon: History },
   { route: "settings", label: "Settings", icon: SettingsIcon },

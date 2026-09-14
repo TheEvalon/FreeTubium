@@ -22,6 +22,15 @@ export const DOWNLOAD_EVENTS = {
   error: "download://error",
 } as const;
 
+export const WATCH_EVENTS = {
+  /** Emitted while ffmpeg prepares a video for the local player. Payload: {@link PrepareProgressPayload} */
+  prepareProgress: "watch://prepare-progress",
+  /** Emitted when a prepared file is complete and playable. Payload: the session id. */
+  prepareReady: "watch://prepare-ready",
+  /** Emitted when preparation fails. Payload: {@link PrepareErrorPayload} */
+  prepareError: "watch://prepare-error",
+} as const;
+
 // ---------- analyze types ----------
 
 export interface FormatInfo {
@@ -172,6 +181,73 @@ export interface DownloadErrorPayload {
   cancelled: boolean;
 }
 
+// ---------- authentication types ----------
+
+/**
+ * Cookies are the only way to authenticate yt-dlp with YouTube: its OAuth
+ * login no longer works and password login was removed.
+ *
+ * - `none`: signed out; account-restricted content stays unavailable.
+ * - `file`: a Netscape cookies.txt stored by the app, either captured from the
+ *   in-app sign-in window or imported by the user.
+ * - `browser`: read straight from an installed browser at call time.
+ */
+export type AuthMode = "none" | "file" | "browser";
+
+/** Browsers yt-dlp's `--cookies-from-browser` understands. */
+export type CookieBrowser =
+  | "brave"
+  | "chrome"
+  | "chromium"
+  | "edge"
+  | "firefox"
+  | "opera"
+  | "safari"
+  | "vivaldi"
+  | "whale";
+
+export interface AuthStatus {
+  mode: AuthMode;
+  browser: CookieBrowser | null;
+  cookieFileExists: boolean;
+  /** Number of cookies in the stored cookie file */
+  cookieCount: number;
+  /**
+   * True when the stored cookies include a YouTube session cookie. This means
+   * they were captured while signed in, not that they are still valid — YouTube
+   * rotates cookies and can invalidate them at any time.
+   */
+  signedIn: boolean;
+  /** Earliest session-cookie expiry as a Unix timestamp, when known */
+  expiresAt: number | null;
+}
+
+// ---------- watch types ----------
+
+export interface StreamInfo {
+  /** Identifies the preparation job, for cancellation and cleanup */
+  sessionId: string;
+  /** Absolute path of the prepared MP4; load it with `convertFileSrc` */
+  playbackPath: string;
+  videoId: string;
+  title: string;
+  /** Duration in seconds */
+  duration: number | null;
+  /** Height of the selected video rendition */
+  height: number | null;
+}
+
+export interface PrepareProgressPayload {
+  sessionId: string;
+  /** 0–100 */
+  percent: number;
+}
+
+export interface PrepareErrorPayload {
+  sessionId: string;
+  message: string;
+}
+
 // ---------- settings & history types ----------
 
 export interface Settings {
@@ -192,6 +268,12 @@ export interface Settings {
   embedMetadata: boolean;
   clipboardWatcher: boolean;
   theme: "dark" | "light";
+  /** How yt-dlp authenticates with YouTube */
+  authMode: AuthMode;
+  /** Browser to read cookies from; only used when authMode is "browser" */
+  cookiesBrowser: CookieBrowser | null;
+  /** Max height for in-app playback; "best" = no cap */
+  watchQuality: Quality;
 }
 
 export interface HistoryEntry {
@@ -271,6 +353,68 @@ export function updateYtdlp(): Promise<string> {
   return invoke("update_ytdlp");
 }
 
+// ---------- authentication commands ----------
+
+/** Current YouTube authentication status. */
+export function youtubeAuthStatus(): Promise<AuthStatus> {
+  return invoke("youtube_auth_status");
+}
+
+/** Opens a window on Google's sign-in page. */
+export function openYoutubeLogin(): Promise<void> {
+  return invoke("open_youtube_login");
+}
+
+/**
+ * Stores the sign-in window's cookies and switches authentication on. Rejects
+ * when no cookies are found or the session is not signed in.
+ */
+export function captureYoutubeCookies(): Promise<AuthStatus> {
+  return invoke("capture_youtube_cookies");
+}
+
+/** Imports a Netscape `cookies.txt` the user exported themselves. */
+export function importCookiesFile(path: string): Promise<AuthStatus> {
+  return invoke("import_cookies_file", { path });
+}
+
+/** Switches to reading cookies straight from an installed browser. */
+export function useBrowserCookies(browser: CookieBrowser): Promise<AuthStatus> {
+  return invoke("use_browser_cookies", { browser });
+}
+
+/** Turns authentication off and deletes the stored cookies. */
+export function clearYoutubeAuth(): Promise<AuthStatus> {
+  return invoke("clear_youtube_auth");
+}
+
+// ---------- watch commands ----------
+
+/**
+ * Starts preparing a video for the local player and resolves once the output
+ * path is known. Wait for {@link onPrepareReady} before playing; progress
+ * arrives on {@link onPrepareProgress}.
+ */
+export function prepareStream(
+  url: string,
+  quality?: Quality,
+): Promise<StreamInfo> {
+  return invoke("prepare_stream", { url, quality });
+}
+
+/** Stops a preparation job and deletes its file. */
+export function stopStream(sessionId: string): Promise<void> {
+  return invoke("stop_stream", { sessionId });
+}
+
+/**
+ * URL of the loopback page that hosts the YouTube embed. The embed needs a real
+ * http origin, which the app's own `tauri://` origin cannot provide.
+ */
+export function playerPageUrl(): Promise<string> {
+  return invoke("player_page_url");
+}
+
 // ---------- event listener helpers ----------
 
 export function onDownloadProgress(
@@ -301,6 +445,28 @@ export function onDownloadError(
   handler: (payload: DownloadErrorPayload) => void,
 ): Promise<UnlistenFn> {
   return listen<DownloadErrorPayload>(DOWNLOAD_EVENTS.error, (e) =>
+    handler(e.payload),
+  );
+}
+
+export function onPrepareProgress(
+  handler: (payload: PrepareProgressPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<PrepareProgressPayload>(WATCH_EVENTS.prepareProgress, (e) =>
+    handler(e.payload),
+  );
+}
+
+export function onPrepareReady(
+  handler: (sessionId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<string>(WATCH_EVENTS.prepareReady, (e) => handler(e.payload));
+}
+
+export function onPrepareError(
+  handler: (payload: PrepareErrorPayload) => void,
+): Promise<UnlistenFn> {
+  return listen<PrepareErrorPayload>(WATCH_EVENTS.prepareError, (e) =>
     handler(e.payload),
   );
 }

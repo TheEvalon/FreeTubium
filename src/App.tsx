@@ -11,10 +11,12 @@ import { HistoryScreen } from "./screens/HistoryScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { QueueScreen } from "./screens/QueueScreen";
 import { SettingsScreen } from "./screens/SettingsScreen";
+import { WatchScreen } from "./screens/WatchScreen";
 import { AnalyzerProvider, useAnalyzer } from "./state/analyzer";
 import { DownloadsProvider } from "./state/downloads";
 import { SettingsProvider, useSettings } from "./state/settings";
 import { ToastProvider } from "./state/toast";
+import { WatchProvider } from "./state/watch";
 
 function ClipboardBanner({
   suggestion,
@@ -108,6 +110,8 @@ function Shell() {
             >
               {route === "home" ? (
                 <HomeScreen onQueued={() => setRoute("queue")} />
+              ) : route === "watch" ? (
+                <WatchScreen />
               ) : route === "queue" ? (
                 <QueueScreen onAddMore={() => setRoute("home")} />
               ) : route === "history" ? (
@@ -129,8 +133,10 @@ export default function App() {
       <SettingsProvider>
         <DownloadsProvider>
           <AnalyzerProvider>
-            <Shell />
-            <ToastViewport />
+            <WatchProvider>
+              <Shell />
+              <ToastViewport />
+            </WatchProvider>
           </AnalyzerProvider>
         </DownloadsProvider>
       </SettingsProvider>
