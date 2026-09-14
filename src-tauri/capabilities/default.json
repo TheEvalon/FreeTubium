@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window. Deliberately scoped to \"main\" so the youtube-login window, which shows Google's remote sign-in page, gets no permissions and cannot reach any app command.",
   "windows": ["main"],
   "permissions": [
     "core:default",

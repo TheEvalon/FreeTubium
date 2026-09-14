@@ -11,7 +11,7 @@ pub async fn analyze(app: &AppHandle, url: &str) -> Result<AnalyzeResult, String
     // Resolving every entry in full instead costs one network round-trip per
     // video (~30s and ~20MB of JSON for only 19 items), which makes larger
     // playlists unusable. Single-video URLs are unaffected by the flag.
-    let output = ytdlp::run_ytdlp(
+    let output = ytdlp::run_ytdlp_authed(
         app,
         &["-J", "--flat-playlist", "--no-warnings", "--no-colors", url],
     )

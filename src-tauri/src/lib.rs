@@ -1,7 +1,10 @@
 mod analyze;
+mod auth;
 mod downloads;
 mod models;
+mod player_server;
 mod store;
+mod watch;
 mod ytdlp;
 
 use std::path::PathBuf;
@@ -129,6 +132,10 @@ pub fn run() {
             app.manage(SettingsState(Mutex::new(settings)));
             app.manage(HistoryState(Mutex::new(store::load_history(handle))));
             app.manage(downloads::DownloadManagerState::default());
+            app.manage(watch::WatchState::default());
+            app.manage(player_server::PlayerServerState::default());
+            // A crash can leave prepared playback files behind.
+            watch::clean_cache(handle);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -143,7 +150,16 @@ pub fn run() {
             clear_history,
             remove_history_entry,
             get_ytdlp_version,
-            update_ytdlp
+            update_ytdlp,
+            auth::youtube_auth_status,
+            auth::open_youtube_login,
+            auth::capture_youtube_cookies,
+            auth::import_cookies_file,
+            auth::use_browser_cookies,
+            auth::clear_youtube_auth,
+            watch::prepare_stream,
+            watch::stop_stream,
+            player_server::player_page_url
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

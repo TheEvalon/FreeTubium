@@ -191,6 +191,13 @@ pub struct Settings {
     pub clipboard_watcher: bool,
     /// "dark" | "light"
     pub theme: String,
+    /// How yt-dlp authenticates with YouTube: "none" | "file" | "browser".
+    pub auth_mode: String,
+    /// Browser name for `--cookies-from-browser`; only used when
+    /// `auth_mode` is "browser".
+    pub cookies_browser: Option<String>,
+    /// Preferred max height for in-app playback, e.g. "1080"; "best" = no cap.
+    pub watch_quality: String,
 }
 
 impl Default for Settings {
@@ -210,8 +217,64 @@ impl Default for Settings {
             embed_metadata: true,
             clipboard_watcher: false,
             theme: "dark".into(),
+            auth_mode: "none".into(),
+            cookies_browser: None,
+            watch_quality: "1080".into(),
         }
     }
+}
+
+// ---------- authentication ----------
+
+/// Current state of YouTube authentication, as shown in Settings.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthStatus {
+    /// "none" | "file" | "browser"
+    pub mode: String,
+    pub browser: Option<String>,
+    pub cookie_file_exists: bool,
+    /// Number of cookies in the stored cookie file.
+    pub cookie_count: usize,
+    /// True when the stored cookies include a YouTube session cookie. A
+    /// heuristic: it means cookies were captured while signed in, not that
+    /// they are still valid.
+    pub signed_in: bool,
+    /// Earliest expiry among the session cookies, as a Unix timestamp.
+    pub expires_at: Option<u64>,
+}
+
+// ---------- watch ----------
+
+/// A video prepared for the Watch page's local player.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamInfo {
+    /// Identifies the preparation job, so it can be cancelled and cleaned up.
+    pub session_id: String,
+    /// Absolute path of the prepared MP4. The UI turns this into a URL the
+    /// webview can load with Tauri's `convertFileSrc`.
+    pub playback_path: String,
+    pub video_id: String,
+    pub title: String,
+    pub duration: Option<f64>,
+    /// Height of the selected video rendition, when known.
+    pub height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareProgressPayload {
+    pub session_id: String,
+    /// 0-100, based on how much of the duration ffmpeg has written.
+    pub percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrepareErrorPayload {
+    pub session_id: String,
+    pub message: String,
 }
 
 // ---------- history ----------

@@ -16,10 +16,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `protocol-asset` lets the webview load prepared playback files from disk with
+# range requests, which is what makes seeking work in the local player.
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+# Serves the YouTube embed's host page from 127.0.0.1 so the embed has a real
+# http origin. One static route, so a full async framework would be overkill.
+tiny_http = "0.12"
