@@ -23,3 +23,8 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
+# Serves the embed's host page and the prepared playback files from 127.0.0.1:
+# the embed needs a real http origin, and WebKitGTK will not play media from a
+# custom scheme. Two routes and byte ranges, so a full async framework would be
+# overkill.
+tiny_http = "0.12"

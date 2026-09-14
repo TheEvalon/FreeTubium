@@ -46,7 +46,19 @@ operating system's own webview instead of shipping a browser.
 - Live progress, transfer speed, and ETA per download
 - Pause, resume, cancel, and retry — pausing resumes from the partial file instead of starting over
 - Optional per-download speed limit
-- Searchable history that survives restarts, with re-download and reveal-in-folder
+- Searchable history that survives restarts, with watch, re-download, and reveal-in-folder
+
+**Watching**
+- A **Watch** page that plays videos and playlists inside the app, without opening a browser
+- Playlists become a play queue that auto-advances, with a click-to-jump list
+- Videos play in YouTube's own player; anything it refuses — age-restricted, members-only, or embedding-disabled — falls back per item to a local player that extracts the video with the bundled `yt-dlp`
+- Save whatever is playing to the download queue in one click
+- Play a finished download straight from the History page, with nothing to fetch
+
+**YouTube account (optional)**
+- Sign in inside the app, read cookies from an installed browser, or import a `cookies.txt`
+- Applies to downloads as well as watching, so restricted videos work everywhere
+- Off by default, with the account-restriction risk spelled out before you opt in
 
 **Comfort**
 - Dark and light themes
@@ -218,6 +230,81 @@ build when that host is unreachable.
 Because `yt-dlp` needs regular updates to keep up with site changes, Settings has
 a **Update yt-dlp** button that runs the bundled binary's own self-update.
 
+## Watching in the app
+
+The Watch page runs two players behind one queue.
+
+**YouTube's player** handles anything it is willing to embed. It streams from
+YouTube directly, so views and ads count normally and FreeTubium does nothing
+clever. It is hosted in an iframe served from `127.0.0.1` rather than pointed at
+YouTube from the app window: YouTube requires an HTTP `Referer` and shows its
+blocked-playback screen (error 153) without one, and the app itself is served
+from a custom `tauri://` scheme that cannot provide one. That loopback server
+answers only tokenised paths, so no other process on the machine can drive the
+player or read what you are watching.
+
+**The local player** handles what the embed refuses. YouTube reports error 101
+or 150 for videos whose uploader disallowed embedding, and 100 for videos it
+cannot see; each of those switches that one queue item — and only that item — to
+the local player, which extracts the video with `yt-dlp`.
+
+The local player has to combine streams before it can play anything. YouTube no
+longer offers a single format containing both video and audio, so every rendition
+is video-only or audio-only. Preparation downloads one of each and merges them
+into an MP4 without re-encoding, preferring H.264 video with AAC audio because
+that combination plays reliably in all three system webviews. Prepared files
+live in the app cache directory and are deleted when you move on, and on startup.
+
+Playback goes over the same loopback server as the embed, with byte-range
+support so the video is seekable end to end. Tauri's asset protocol would be the
+obvious choice and is not usable here: WebKitGTK hands media to GStreamer, which
+accepts only `blob`, `data`, `file`, `http` and `https`, so an `asset://` URL can
+never drive a `<video>` on Linux ([WebKit
+146351](https://bugs.webkit.org/show_bug.cgi?id=146351)). `http` works on every
+platform.
+
+`yt-dlp` does the downloading and ffmpeg only ever merges local files — the same
+division of labour as the download path. That is not just for consistency: the
+Linux ffmpeg build is statically linked, which leaves it unable to resolve
+hostnames, and it crashes outright if handed an http URL.
+
+**Already-downloaded files** need none of that. Completed entries on the History
+page have a **Watch** action that plays the file from disk, so nothing is fetched
+and nothing is extracted. It still goes over the loopback server, for the same
+reason prepared files do, and releasing it stops the server serving the file
+without deleting your download.
+
+## Using a YouTube account
+
+Age-restricted, members-only and private videos need an account. `yt-dlp` can
+only authenticate with cookies — its OAuth support no longer works with YouTube
+and password login was removed — so Settings → **YouTube account** offers three
+ways to supply them:
+
+| Option | How it works | When to use it |
+| --- | --- | --- |
+| Sign in inside the app | Opens Google's sign-in page in a window, then stores that session's cookies | The simplest path, when Google allows it |
+| Read from a browser | Runs `yt-dlp --cookies-from-browser` against a browser you are already signed into | When you are already signed in elsewhere |
+| Import a `cookies.txt` | Copies a Netscape-format file exported by a browser extension | When neither of the above works |
+
+Two caveats worth knowing before you start, both from `yt-dlp`'s own guidance:
+
+- **Use a throwaway account.** Using an account this way risks YouTube
+  restricting it, temporarily or permanently.
+- **`--cookies-from-browser` does not work with Chrome 127 or later,** which
+  encrypts its cookie store in a way `yt-dlp` cannot read. Prefer Firefox for
+  that option.
+
+Google also sometimes refuses to sign in from an embedded browser with a "this
+browser may not be secure" message, which is why the two import paths exist
+alongside the in-app one.
+
+Cookies expire, and watching keeps a YouTube session alive in the same cookie
+jar, which can prompt YouTube to rotate them. When a video fails for a
+sign-in-related reason the app says so and points at the re-capture action. The
+stored cookie file grants access to your account, so treat it like a password;
+signing out deletes it.
+
 ## Architecture
 
 ```
@@ -230,6 +317,9 @@ React UI  ──invoke──▶  Rust core  ──spawn──▶  yt-dlp  ──
 - **`src-tauri/src/`** — the Rust core:
   - `analyze.rs` — metadata via `yt-dlp -J`
   - `downloads.rs` — the download queue, concurrency, progress parsing, cancellation
+  - `auth.rs` — YouTube cookies, shared by analyze, download and watch
+  - `watch.rs` — picks renditions and remuxes them for the local player
+  - `player_server.rs` — serves the embed's host page and prepared files from `127.0.0.1`
   - `store.rs` — settings and history persisted as JSON in the app config directory
   - `ytdlp.rs` — sidecar plumbing
 
@@ -259,6 +349,13 @@ domain), or media you have the copyright holder's permission to save. Respect th
 terms of service of the sites you use, and respect copyright law in your
 jurisdiction — in many places downloading copyrighted material without
 permission is illegal, and a site's terms may prohibit downloading regardless.
+
+The same applies to watching. The Watch page's default player is YouTube's own,
+which streams from YouTube on YouTube's terms. The local player exists for
+content the embed refuses and it extracts the video rather than streaming it, so
+use it only where you would be entitled to download the same video. If you supply
+an account, use one you are willing to lose: authenticating `yt-dlp` with it may
+breach YouTube's terms and can get it restricted.
 
 You are responsible for how you use this tool. The authors accept no liability
 for misuse.

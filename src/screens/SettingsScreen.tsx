@@ -6,15 +6,18 @@ import {
   FolderOpen,
   Gauge,
   Info,
+  MonitorPlay,
   Moon,
   Package,
   RefreshCw,
   Sun,
   Terminal,
   Type,
+  UserRound,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { YouTubeAccount } from "../components/settings/YouTubeAccount";
 import { Button, IconButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import {
@@ -33,8 +36,13 @@ import {
   type Container,
   type Quality,
 } from "../lib/api";
+import { cn } from "../lib/cn";
 import { shortErrorMessage } from "../lib/errors";
 import { AUDIO_FORMATS, CONTAINERS, defaultQualityOptions } from "../lib/quality";
+import {
+  SETTINGS_YOUTUBE_ACCOUNT,
+  useNavigation,
+} from "../state/navigation";
 import { useSettings } from "../state/settings";
 import { useToast } from "../state/toast";
 
@@ -51,18 +59,28 @@ const TEMPLATE_PRESETS: Array<{ label: string; value: string }> = [
 const SPEED_PRESETS = ["1M", "2M", "5M", "10M"];
 
 function SettingsSection({
+  id,
   icon,
   title,
   description,
+  highlighted = false,
   children,
 }: {
+  id?: string;
   icon: React.ReactNode;
   title: string;
   description?: string;
+  highlighted?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <Card className="flex flex-col gap-4">
+    <Card
+      id={id}
+      className={cn(
+        "flex scroll-mt-4 flex-col gap-4 transition-shadow duration-500",
+        highlighted && "border-violet/50 shadow-glow",
+      )}
+    >
       <div className="flex items-start gap-3">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-hairline bg-accent-soft text-violet">
           {icon}
@@ -86,9 +104,22 @@ function SettingsSection({
 export function SettingsScreen() {
   const { settings, update, saving, toggleTheme } = useSettings();
   const { push } = useToast();
+  const { focus, clearFocus } = useNavigation();
   const [version, setVersion] = useState<string | null>(null);
   const [versionError, setVersionError] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
+
+  // Arriving from a sign-in prompt should land on the account section rather
+  // than the top of a long page. The highlight fades once it has been seen.
+  useEffect(() => {
+    if (!focus) return;
+    document.getElementById(focus)?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    const timer = window.setTimeout(clearFocus, 2200);
+    return () => window.clearTimeout(timer);
+  }, [focus, clearFocus]);
 
   const loadVersion = useCallback(async () => {
     try {
@@ -419,6 +450,49 @@ export function SettingsScreen() {
             onChange={(checked) => update({ clipboardWatcher: checked })}
           />
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        icon={<MonitorPlay className="size-4" />}
+        title="Watch"
+        description="In-app playback. Videos YouTube's player refuses fall back to a local player that extracts them with yt-dlp."
+      >
+        <Field
+          label="Local player quality"
+          hint="Only applies to the local player; YouTube's own player picks its own quality. Higher settings take longer to prepare."
+        >
+          <div>
+            <SegmentedControl
+              layoutId="settings-watch-quality"
+              value={settings.watchQuality}
+              onChange={(value) => update({ watchQuality: value as Quality })}
+              segments={defaultQualityOptions().map((option) => ({
+                value: (option.quality ?? "best") as Quality,
+                label: option.label,
+                hint: option.hint,
+              }))}
+            />
+          </div>
+        </Field>
+        <div className="flex items-start gap-2 rounded-xl border border-hairline bg-canvas-soft/60 p-3">
+          <Info className="mt-0.5 size-3.5 shrink-0 text-ink-faint" />
+          <p className="text-xs leading-relaxed text-ink-muted">
+            YouTube no longer offers formats with video and audio in one stream,
+            so the local player combines them with the bundled ffmpeg before
+            playback starts. That means a wait up front, and the whole video is
+            seekable once it begins.
+          </p>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        id={SETTINGS_YOUTUBE_ACCOUNT}
+        highlighted={focus === SETTINGS_YOUTUBE_ACCOUNT}
+        icon={<UserRound className="size-4" />}
+        title="YouTube account"
+        description="Optional. Signing in lets yt-dlp reach age-restricted, members-only and private videos, for downloads as well as the Watch page."
+      >
+        <YouTubeAccount />
       </SettingsSection>
 
       <SettingsSection

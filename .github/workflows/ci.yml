@@ -105,3 +105,7 @@ jobs:
       - name: Clippy
         working-directory: src-tauri
         run: cargo clippy --all-targets
+
+      - name: Tests
+        working-directory: src-tauri
+        run: cargo test

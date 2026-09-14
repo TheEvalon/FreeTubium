@@ -28,6 +28,9 @@ export const DEFAULT_SETTINGS: Settings = {
   embedMetadata: true,
   clipboardWatcher: false,
   theme: "dark",
+  authMode: "none",
+  cookiesBrowser: null,
+  watchQuality: "1080",
 };
 
 interface SettingsContextValue {

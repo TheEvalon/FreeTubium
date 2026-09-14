@@ -17,6 +17,7 @@ import { forwardRef, type ReactNode } from "react";
 import { cn } from "../lib/cn";
 import { formatEta, formatSpeed } from "../lib/format";
 import type { DownloadItem, QueueStatus } from "../state/downloads";
+import { SignInHint } from "./SignInHint";
 import { Badge } from "./ui/Badge";
 import { Button, IconButton } from "./ui/Button";
 import { ProgressBar } from "./ui/ProgressBar";
@@ -185,6 +186,14 @@ export const QueueCard = forwardRef<HTMLDivElement, QueueCardProps>(function Que
               ) : null}
             </div>
           </div>
+
+          {item.status === "error" ? (
+            <SignInHint
+              message={item.error}
+              tone="inline"
+              className="mt-1.5"
+            />
+          ) : null}
         </div>
       </div>
     </motion.div>

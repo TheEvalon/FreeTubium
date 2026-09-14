@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock,
   FolderOpen,
+  MonitorPlay,
   RotateCcw,
   Search,
   Trash2,
@@ -21,7 +22,9 @@ import { openFolder, type HistoryEntry } from "../lib/api";
 import { baseName, formatRelativeTime, hostOf } from "../lib/format";
 import { shortErrorMessage } from "../lib/errors";
 import { useDownloads } from "../state/downloads";
+import { useNavigation } from "../state/navigation";
 import { useToast } from "../state/toast";
+import { useWatch } from "../state/watch";
 
 type Filter = "all" | "completed" | "failed";
 
@@ -42,6 +45,8 @@ export function HistoryScreen({ onQueued }: { onQueued: () => void }) {
     clearAllHistory,
   } = useDownloads();
   const { push } = useToast();
+  const { openFile } = useWatch();
+  const { navigate } = useNavigation();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
@@ -74,6 +79,18 @@ export function HistoryScreen({ onQueued }: { onQueued: () => void }) {
         description: shortErrorMessage(error),
       });
     }
+  };
+
+  /** Plays a finished download on the Watch page, with nothing to fetch. */
+  const watch = (entry: HistoryEntry) => {
+    if (!entry.filePath) return;
+    openFile({
+      path: entry.filePath,
+      title: entry.title,
+      thumbnail: entry.thumbnail,
+      url: entry.url,
+    });
+    navigate("watch");
   };
 
   const redownload = async (entry: HistoryEntry) => {
@@ -218,6 +235,11 @@ export function HistoryScreen({ onQueued }: { onQueued: () => void }) {
                     ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    {entry.status === "completed" && entry.filePath ? (
+                      <IconButton label="Watch" onClick={() => watch(entry)}>
+                        <MonitorPlay className="size-4" />
+                      </IconButton>
+                    ) : null}
                     <IconButton
                       label="Download again"
                       onClick={() => void redownload(entry)}

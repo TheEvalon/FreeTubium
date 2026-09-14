@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>FreeTubium player</title>
+    <!--
+      This page exists only to give the YouTube embed a real http origin.
+      YouTube's terms require embedders to send an HTTP Referer and show a
+      "blocked playback" screen (error 153) without one; the app itself is
+      served from a custom tauri:// scheme, which cannot provide one. It is
+      served from 127.0.0.1 by the app and talks to the app window over
+      postMessage.
+    -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #player {
+        width: 100%;
+        height: 100%;
+        border: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="player"></div>
+    <script>
+      var player = null;
+      var ready = false;
+      var pendingVideoId = null;
+
+      function send(message) {
+        message.source = "freetubium-player";
+        parent.postMessage(message, "*");
+      }
+
+      function load(videoId) {
+        if (!ready) {
+          pendingVideoId = videoId;
+          return;
+        }
+        player.loadVideoById(videoId);
+      }
+
+      window.onYouTubeIframeAPIReady = function () {
+        player = new YT.Player("player", {
+          width: "100%",
+          height: "100%",
+          playerVars: {
+            autoplay: 1,
+            rel: 0,
+            modestbranding: 1,
+            playsinline: 1,
+          },
+          events: {
+            onReady: function () {
+              ready = true;
+              send({ type: "ready" });
+              if (pendingVideoId) {
+                load(pendingVideoId);
+                pendingVideoId = null;
+              }
+            },
+            onStateChange: function (event) {
+              send({ type: "state", state: event.data });
+            },
+            // 101 and 150 both mean the uploader disallowed embedding, which is
+            // the app's signal to fall back to the local player.
+            onError: function (event) {
+              send({ type: "error", code: event.data });
+            },
+          },
+        });
+      };
+
+      window.addEventListener("message", function (event) {
+        var data = event.data;
+        if (!data || data.source !== "freetubium-host") return;
+        switch (data.type) {
+          case "load":
+            load(data.videoId);
+            break;
+          case "play":
+            if (player) player.playVideo();
+            break;
+          case "pause":
+            if (player) player.pauseVideo();
+            break;
+          case "seek":
+            if (player) player.seekTo(data.seconds, true);
+            break;
+          case "volume":
+            if (player) player.setVolume(data.volume);
+            break;
+        }
+      });
+
+      var tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(tag);
+    </script>
+  </body>
+</html>

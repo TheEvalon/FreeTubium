@@ -52,6 +52,18 @@ pub async fn run_ytdlp(app: &AppHandle, args: &[&str]) -> Result<Output, String>
         .map_err(|e| format!("failed to run yt-dlp: {e}"))
 }
 
+/// Same as [`run_ytdlp`], with the user's YouTube cookies applied so
+/// account-restricted content resolves.
+pub async fn run_ytdlp_authed(app: &AppHandle, args: &[&str]) -> Result<Output, String> {
+    let mut all: Vec<String> = crate::auth::args(app);
+    all.extend(args.iter().map(|a| (*a).to_string()));
+    command(app)?
+        .args(&all)
+        .output()
+        .await
+        .map_err(|e| format!("failed to run yt-dlp: {e}"))
+}
+
 pub fn stdout_string(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).trim().to_string()
 }

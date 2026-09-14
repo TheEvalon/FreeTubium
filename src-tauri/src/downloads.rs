@@ -270,7 +270,7 @@ fn spawn_download(app: &AppHandle, pending: &Pending) -> Result<CommandChild, St
         let s = state.0.lock().unwrap();
         s.clone()
     };
-    let args = build_args(&pending.request, &settings);
+    let args = build_args(&pending.request, &settings, &crate::auth::args_for(app, &settings));
 
     let (mut rx, child) = ytdlp::command(app)?
         .args(&args)
@@ -435,8 +435,9 @@ fn finish_download(
 }
 
 /// Builds the yt-dlp argument list for a download request, falling back to
-/// settings defaults where the request leaves options unset.
-fn build_args(request: &DownloadRequest, settings: &Settings) -> Vec<String> {
+/// settings defaults where the request leaves options unset. `auth` carries the
+/// cookie arguments so signing in also unlocks restricted downloads.
+fn build_args(request: &DownloadRequest, settings: &Settings, auth: &[String]) -> Vec<String> {
     let mut args: Vec<String> = vec![
         "--newline".into(),
         "--no-colors".into(),
@@ -449,6 +450,8 @@ fn build_args(request: &DownloadRequest, settings: &Settings) -> Vec<String> {
         "--print".into(),
         format!("after_move:{FILE_MARKER}%(filepath)s"),
     ];
+
+    args.extend(auth.iter().cloned());
 
     if let Some(ffmpeg) = ytdlp::ffmpeg_path() {
         args.push("--ffmpeg-location".into());
