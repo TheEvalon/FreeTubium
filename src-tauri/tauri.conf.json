@@ -20,11 +20,7 @@
       }
     ],
     "security": {
-      "csp": null,
-      "assetProtocol": {
-        "enable": true,
-        "scope": ["$APPCACHE/watch/**"]
-      }
+      "csp": null
     }
   },
   "bundle": {

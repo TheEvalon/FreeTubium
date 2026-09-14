@@ -264,6 +264,7 @@ export function WatchScreen() {
                     title={current.title}
                     onEnded={next}
                     onRetry={retryLocal}
+                    onSave={() => void saveCurrent()}
                   />
                 )}
               </div>

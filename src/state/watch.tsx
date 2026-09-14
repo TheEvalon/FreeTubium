@@ -50,7 +50,8 @@ export interface WatchItem {
 export type PrepareState =
   | { status: "idle" }
   | { status: "preparing"; percent: number }
-  | { status: "ready"; path: string }
+  /** `url` plays the file; `path` is the file itself, for acting on it. */
+  | { status: "ready"; url: string; path: string }
   | { status: "error"; message: string };
 
 interface WatchContextValue {
@@ -147,7 +148,9 @@ export function WatchProvider({ children }: { children: ReactNode }) {
    * session id, so outcomes that arrive early are held here and applied once the
    * session is known.
    */
-  const earlyReady = useRef<Map<string, string>>(new Map());
+  const earlyReady = useRef<Map<string, { url: string; path: string }>>(
+    new Map(),
+  );
   const earlyError = useRef<Map<string, string>>(new Map());
 
   const current = queue[index] ?? null;
@@ -202,12 +205,12 @@ export function WatchProvider({ children }: { children: ReactNode }) {
     );
 
     track(
-      onPrepareReady(({ sessionId, path }) => {
+      onPrepareReady(({ sessionId, url, path }) => {
         if (sessionId !== session.current) {
-          earlyReady.current.set(sessionId, path);
+          earlyReady.current.set(sessionId, { url, path });
           return;
         }
-        setPrepare({ status: "ready", path });
+        setPrepare({ status: "ready", url, path });
       }),
     );
 
@@ -251,13 +254,13 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       session.current = sessionId;
 
       const failure = earlyError.current.get(sessionId);
-      const readyPath = earlyReady.current.get(sessionId);
+      const ready = earlyReady.current.get(sessionId);
       if (failure !== undefined) {
         earlyError.current.delete(sessionId);
         setPrepare({ status: "error", message: failure });
-      } else if (readyPath !== undefined) {
+      } else if (ready !== undefined) {
         earlyReady.current.delete(sessionId);
-        setPrepare({ status: "ready", path: readyPath });
+        setPrepare({ status: "ready", ...ready });
       }
     },
     [releaseSession, settings.watchQuality],

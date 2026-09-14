@@ -235,7 +235,12 @@ export interface PrepareProgressPayload {
 
 export interface PrepareReadyPayload {
   sessionId: string;
-  /** Absolute path of the prepared MP4; load it with `convertFileSrc` */
+  /**
+   * Loopback URL to set as the `<video>` source. Not a file path: WebKitGTK
+   * will not let a media element load Tauri's `asset://` scheme.
+   */
+  url: string;
+  /** Absolute path of the prepared MP4, for acting on the file itself. */
   path: string;
 }
 

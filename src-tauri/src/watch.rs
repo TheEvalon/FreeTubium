@@ -88,14 +88,36 @@ fn remove_session_files(app: &AppHandle, session_id: &str) {
 /// renditions: all three system webviews play it reliably in an MP4, which the
 /// others cannot be relied on to do. Each preference falls back to the next, so
 /// a video that offers none of them still plays.
+///
+/// The pre-muxed fallbacks ask for mp4 and webm by name before taking whatever
+/// ranks highest. yt-dlp ranks purely on quality, which on sites that still
+/// serve legacy renditions means a 720p AVI wins over a 360p mp4 — and a file
+/// the webview cannot decode is worth less than a smaller one it can.
 fn format_selector(quality: &str) -> String {
+    // Ordered by how likely a webview is to play the result, not by size.
+    const PLAYABLE: [&str; 2] = ["mp4", "webm"];
+
     match quality.parse::<u32>() {
-        Ok(height) => format!(
-            "bv*[height<={height}][vcodec^=avc1]+ba[acodec^=mp4a]/\
-             bv*[height<={height}]+ba/b[height<={height}]/b"
-        ),
+        Ok(height) => {
+            let mut selector = format!(
+                "bv*[height<={height}][vcodec^=avc1]+ba[acodec^=mp4a]/\
+                 bv*[height<={height}]+ba"
+            );
+            for ext in PLAYABLE {
+                selector.push_str(&format!("/b[height<={height}][ext={ext}]"));
+            }
+            selector.push_str(&format!("/b[height<={height}]/b"));
+            selector
+        }
         // "best" and anything unexpected: no height cap.
-        Err(_) => "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b".to_string(),
+        Err(_) => {
+            let mut selector = "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba".to_string();
+            for ext in PLAYABLE {
+                selector.push_str(&format!("/b[ext={ext}]"));
+            }
+            selector.push_str("/b");
+            selector
+        }
     }
 }
 
@@ -129,6 +151,13 @@ fn prepare_args(
         "-f".into(),
         format_selector(quality),
         "--merge-output-format".into(),
+        "mp4".into(),
+        // A merge is not the only way to end up with an unplayable file: when
+        // the selector falls through to a single pre-muxed format, yt-dlp keeps
+        // whatever container the site served, and `--merge-output-format` has
+        // nothing to do. Sites outside YouTube hand out AVI and MKV, which no
+        // system webview plays, so force the container either way.
+        "--remux-video".into(),
         "mp4".into(),
         "-o".into(),
         dir.join(format!("{session_id}.%(ext)s"))
@@ -246,13 +275,33 @@ pub fn prepare_stream(
 
         match (exit_code, path) {
             (Some(0), Some(path)) => {
-                let _ = handle.emit(
-                    EVENT_PREPARE_READY,
-                    PrepareReadyPayload {
-                        session_id: id,
-                        path,
-                    },
-                );
+                // The webview cannot play the file off disk: WebKitGTK hands
+                // media to GStreamer, which rejects Tauri's `asset://` scheme
+                // outright, so playback goes over the loopback server instead.
+                let server = handle.state::<crate::player_server::PlayerServerState>();
+                match crate::player_server::ensure(&server) {
+                    Ok(server) => {
+                        server.register(&id, PathBuf::from(&path));
+                        let url = server.media_url(&id);
+                        let _ = handle.emit(
+                            EVENT_PREPARE_READY,
+                            PrepareReadyPayload {
+                                session_id: id,
+                                url,
+                                path,
+                            },
+                        );
+                    }
+                    Err(message) => {
+                        let _ = handle.emit(
+                            EVENT_PREPARE_ERROR,
+                            PrepareErrorPayload {
+                                session_id: id,
+                                message,
+                            },
+                        );
+                    }
+                }
             }
             _ => {
                 let message = stderr_tail
@@ -289,6 +338,17 @@ pub fn stop_stream(app: AppHandle, session_id: String) -> Result<(), String> {
             let _ = child.kill();
         }
     }
+    // Stop serving before deleting, so a late range request cannot race the
+    // removal and read a half-deleted file.
+    if let Some(server) = app
+        .state::<crate::player_server::PlayerServerState>()
+        .0
+        .lock()
+        .unwrap()
+        .as_ref()
+    {
+        server.unregister(&session_id);
+    }
     remove_session_files(&app, &session_id);
     Ok(())
 }
@@ -311,8 +371,28 @@ mod tests {
     fn selector_without_a_cap_is_used_for_best() {
         assert_eq!(
             format_selector("best"),
-            "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b"
+            "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b[ext=mp4]/b[ext=webm]/b"
         );
+    }
+
+    /// Sites that still serve legacy renditions offer a high-resolution AVI
+    /// alongside a smaller mp4, and yt-dlp ranks the AVI higher on quality
+    /// alone. A playable container has to be asked for before the bare `b`.
+    #[test]
+    fn selector_asks_for_playable_containers_before_giving_up() {
+        for quality in ["720", "best"] {
+            let selector = format_selector(quality);
+            let alternatives: Vec<&str> = selector.split('/').collect();
+            let mp4 = alternatives
+                .iter()
+                .position(|a| a.contains("ext=mp4"))
+                .unwrap_or_else(|| panic!("{quality}: no mp4 preference in {selector}"));
+            let anything = alternatives
+                .iter()
+                .position(|a| *a == "b")
+                .unwrap_or_else(|| panic!("{quality}: no last resort in {selector}"));
+            assert!(mp4 < anything, "{quality}: {selector}");
+        }
     }
 
     #[test]
@@ -327,6 +407,17 @@ mod tests {
         assert!(output.ends_with("abc.%(ext)s"), "{output}");
         assert!(args.contains(&"--no-playlist".to_string()));
         assert_eq!(args.last().unwrap(), "https://example.com/v");
+    }
+
+    /// A single pre-muxed format skips the merge entirely, so the container has
+    /// to be forced separately or sites serving AVI produce an unplayable file.
+    #[test]
+    fn args_force_mp4_whether_or_not_a_merge_happens() {
+        let args = prepare_args("abc", "https://example.com/v", "720", Path::new("/c"), &[]);
+        for flag in ["--merge-output-format", "--remux-video"] {
+            let index = args.iter().position(|a| a == flag).expect(flag);
+            assert_eq!(args[index + 1], "mp4", "{flag}");
+        }
     }
 
     #[test]

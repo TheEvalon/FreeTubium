@@ -259,8 +259,11 @@ pub struct PrepareProgressPayload {
 #[serde(rename_all = "camelCase")]
 pub struct PrepareReadyPayload {
     pub session_id: String,
-    /// Absolute path of the prepared MP4. The UI turns this into a URL the
-    /// webview can load with Tauri's `convertFileSrc`.
+    /// Loopback URL to play. Not the file path, because WebKitGTK will not let
+    /// a `<video>` load Tauri's `asset://` scheme.
+    pub url: String,
+    /// Absolute path of the prepared MP4, for anything acting on the file
+    /// itself rather than playing it.
     pub path: String,
 }
 
