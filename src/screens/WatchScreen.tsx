@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   ClipboardPaste,
   Download,
+  FolderOpen,
   Link2,
   MonitorPlay,
   Search,
@@ -22,7 +23,9 @@ import { Button, IconButton } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Spinner } from "../components/ui/Spinner";
+import { openFolder } from "../lib/api";
 import { looksLikeUrl, readClipboardText } from "../lib/clipboard";
+import { shortErrorMessage } from "../lib/errors";
 import { formatDuration } from "../lib/format";
 import { buildRequest, initialOptions } from "../lib/downloadOptions";
 import { defaultQualityOptions } from "../lib/quality";
@@ -84,6 +87,20 @@ export function WatchScreen() {
   const handleClear = () => {
     clear();
     inputRef.current?.focus();
+  };
+
+  /** Opens the folder holding an already-downloaded file. */
+  const revealCurrent = async () => {
+    if (!current?.filePath) return;
+    try {
+      await openFolder(current.filePath);
+    } catch (error) {
+      push({
+        tone: "error",
+        title: "Could not open the folder",
+        description: shortErrorMessage(error),
+      });
+    }
   };
 
   /** Sends whatever is playing to the download queue. */
@@ -264,7 +281,9 @@ export function WatchScreen() {
                     title={current.title}
                     onEnded={next}
                     onRetry={retryLocal}
-                    onSave={() => void saveCurrent()}
+                    onSave={
+                      current.filePath ? undefined : () => void saveCurrent()
+                    }
                   />
                 )}
               </div>
@@ -287,7 +306,11 @@ export function WatchScreen() {
                         )
                       }
                     >
-                      {engine === "embed" ? "YouTube player" : "Local player"}
+                      {current.filePath
+                        ? "Downloaded file"
+                        : engine === "embed"
+                          ? "YouTube player"
+                          : "Local player"}
                     </Badge>
                     {current.duration ? (
                       <Badge tone="neutral">{formatDuration(current.duration)}</Badge>
@@ -315,15 +338,24 @@ export function WatchScreen() {
                       </IconButton>
                     </>
                   ) : null}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    icon={<Download className="size-4" />}
-                    loading={saving}
-                    onClick={saveCurrent}
-                  >
-                    Save
-                  </Button>
+                  {current.filePath ? (
+                    <IconButton
+                      label="Reveal in folder"
+                      onClick={() => void revealCurrent()}
+                    >
+                      <FolderOpen className="size-4" />
+                    </IconButton>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon={<Download className="size-4" />}
+                      loading={saving}
+                      onClick={saveCurrent}
+                    >
+                      Save
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -338,9 +370,11 @@ export function WatchScreen() {
                   </Button>
                 ) : null}
                 <p className="ml-auto text-xs text-ink-faint">
-                  {engine === "local"
-                    ? "Extracted with the bundled yt-dlp, using your YouTube cookies when set up."
-                    : "Streamed by YouTube, so views and ads count normally."}
+                  {current.filePath
+                    ? "Playing the file you already downloaded — nothing is being fetched."
+                    : engine === "local"
+                      ? "Extracted with the bundled yt-dlp, using your YouTube cookies when set up."
+                      : "Streamed by YouTube, so views and ads count normally."}
                 </p>
               </div>
             </Card>

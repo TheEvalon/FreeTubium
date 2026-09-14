@@ -3,8 +3,8 @@
 //! YouTube no longer offers muxed formats — every rendition is video-only or
 //! audio-only — so nothing it hands out can go straight into a `<video>`
 //! element. Preparation therefore downloads a video and an audio rendition and
-//! merges them into one MP4, which the webview plays through Tauri's asset
-//! protocol so seeking works across the whole file.
+//! merges them into one MP4, which the webview plays over the loopback server in
+//! [`crate::player_server`] so seeking works across the whole file.
 //!
 //! yt-dlp does the fetching, not ffmpeg. The Linux ffmpeg build is statically
 //! linked, which leaves it unable to resolve hostnames — it crashes outright on
@@ -323,6 +323,43 @@ pub fn prepare_stream(
     });
 
     Ok(session_id)
+}
+
+/// Serves a file that is already on disk and returns how to play it.
+///
+/// A finished download needs no extraction, but it still cannot be handed to a
+/// `<video>` as a path, so it goes over the same loopback server as prepared
+/// streams.
+///
+/// The session is recorded with no child process, so `stop_stream` unregisters
+/// it without having anything to kill. Its cleanup looks for cache files named
+/// after the session id and finds none, which is what keeps it from deleting the
+/// download it was asked to play.
+#[tauri::command]
+pub fn play_local_file(app: AppHandle, path: String) -> Result<PrepareReadyPayload, String> {
+    let file = PathBuf::from(&path);
+    if !file.is_file() {
+        return Err("that file is no longer where it was downloaded".to_string());
+    }
+
+    let session_id = Uuid::new_v4().to_string();
+    let server = {
+        let state = app.state::<crate::player_server::PlayerServerState>();
+        crate::player_server::ensure(&state)?
+    };
+    server.register(&session_id, file);
+
+    {
+        let state = app.state::<WatchState>();
+        let mut guard = state.0.lock().unwrap();
+        guard.insert(session_id.clone(), Session { child: None });
+    }
+
+    Ok(PrepareReadyPayload {
+        url: server.media_url(&session_id),
+        session_id,
+        path,
+    })
 }
 
 /// Stops a preparation session and deletes its files.

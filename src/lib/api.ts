@@ -400,6 +400,17 @@ export function prepareStream(url: string, quality?: Quality): Promise<string> {
   return invoke("prepare_stream", { url, quality });
 }
 
+/**
+ * Serves a file that is already on disk, for playing a finished download.
+ *
+ * Resolves straight away with the same payload {@link onPrepareReady} carries,
+ * because there is nothing to extract. Release it with {@link stopStream}, which
+ * stops serving the file without deleting it.
+ */
+export function playLocalFile(path: string): Promise<PrepareReadyPayload> {
+  return invoke("play_local_file", { path });
+}
+
 /** Stops a preparation job and deletes its file. */
 export function stopStream(sessionId: string): Promise<void> {
   return invoke("stop_stream", { sessionId });

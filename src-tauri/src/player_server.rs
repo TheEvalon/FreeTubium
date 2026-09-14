@@ -20,7 +20,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -145,6 +145,33 @@ fn parse_range(header: Option<&str>, size: u64) -> Requested {
     Requested::Part(start, end)
 }
 
+/// Content type for a served file, from its extension.
+///
+/// Prepared streams are always remuxed to MP4, but the Watch page also plays
+/// finished downloads, which keep whichever container the user asked for. A
+/// webview told `video/mp4` for a WebM or an MP3 may refuse to play it.
+fn content_type(path: &Path) -> &'static str {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
+        Some("webm") => "video/webm",
+        Some("mkv") => "video/x-matroska",
+        Some("ogv") => "video/ogg",
+        Some("mov") => "video/quicktime",
+        Some("avi") => "video/x-msvideo",
+        Some("m4a") => "audio/mp4",
+        Some("mp3") => "audio/mpeg",
+        Some("ogg") | Some("opus") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("wav") => "audio/wav",
+        // Covers mp4 and m4v, and is the safest guess for anything unknown
+        // because everything this server prepares itself is an MP4.
+        _ => "video/mp4",
+    }
+}
+
 /// Serves a prepared file, honouring the range the player asked for.
 ///
 /// Every response opts out of tiny_http's chunked encoding, which it otherwise
@@ -160,9 +187,8 @@ fn media_response(path: &PathBuf, range: Option<&str>) -> Response<Box<dyn Read 
         Err(_) => return text_response(500, "cannot read the prepared file"),
     };
 
-    // Playback always uses MP4; preparation forces the container.
     let mut headers = vec![
-        header("Content-Type", "video/mp4"),
+        header("Content-Type", content_type(path)),
         header("Accept-Ranges", "bytes"),
         // The file only lives as long as the session, and a stale cached copy
         // would outlive it.
@@ -315,13 +341,18 @@ mod tests {
         )
     }
 
-    fn temp_file(contents: &[u8]) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("ft-media-{}.mp4", Uuid::new_v4()));
+    fn temp_file_named(extension: &str, contents: &[u8]) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("ft-media-{}.{extension}", Uuid::new_v4()));
         File::create(&path)
             .expect("create")
             .write_all(contents)
             .expect("write");
         path
+    }
+
+    fn temp_file(contents: &[u8]) -> PathBuf {
+        temp_file_named("mp4", contents)
     }
 
     #[test]
@@ -342,6 +373,34 @@ mod tests {
             let (headers, _) = get(server.port, path, None);
             assert!(headers.starts_with("HTTP/1.1 404"), "{path}: {headers}");
         }
+    }
+
+    /// Finished downloads keep the container the user asked for, so the type has
+    /// to come from the file rather than from what preparation happens to make.
+    #[test]
+    fn content_type_follows_the_container() {
+        for (name, expected) in [
+            ("clip.mp4", "video/mp4"),
+            ("clip.webm", "video/webm"),
+            ("clip.mkv", "video/x-matroska"),
+            ("clip.MP3", "audio/mpeg"),
+            ("clip.m4a", "audio/mp4"),
+            ("clip.opus", "audio/ogg"),
+            // Unknown and missing extensions fall back to the prepared format.
+            ("clip.xyz", "video/mp4"),
+            ("clip", "video/mp4"),
+        ] {
+            assert_eq!(content_type(Path::new(name)), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_download_is_served_as_its_own_type() {
+        let server = start().expect("server starts");
+        server.register("session", temp_file_named("webm", b"0123456789"));
+
+        let (headers, _) = get(server.port, &server.media_url_path("session"), None);
+        assert!(headers.contains("video/webm"), "{headers}");
     }
 
     #[test]

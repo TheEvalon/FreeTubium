@@ -33,7 +33,7 @@ function decodeFailure(video: HTMLVideoElement): string {
   switch (video.error?.code) {
     case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
     case MediaError.MEDIA_ERR_DECODE:
-      return "This system cannot decode the video or audio in this file. It downloaded correctly, so saving it and opening it in a media player will work.";
+      return "This system cannot decode the video or audio in this file. The file itself downloaded correctly, so a media player outside the app will open it.";
     case MediaError.MEDIA_ERR_NETWORK:
       return "The prepared file could not be read. It may have been cleared while playing.";
     default:
@@ -52,7 +52,8 @@ export function LocalPlayer({
   title: string;
   onEnded: () => void;
   onRetry: () => void;
-  onSave: () => void;
+  /** Omitted when the file is already a finished download. */
+  onSave?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [playbackError, setPlaybackError] = useState<string | null>(null);
@@ -77,6 +78,7 @@ export function LocalPlayer({
     // Re-preparing an undecodable file produces the same file, so offer the
     // download instead. A failure during preparation is worth retrying.
     const retryable = prepare.status === "error";
+    const action = retryable ? "retry" : onSave ? "save" : "none";
     return (
       <div className="flex size-full flex-col items-center justify-center gap-3 bg-black/60 px-6 text-center">
         <AlertTriangle className="size-6 text-negative" />
@@ -90,7 +92,7 @@ export function LocalPlayer({
             className="mx-auto mt-2.5 max-w-md justify-center"
           />
         </div>
-        {retryable ? (
+        {action === "retry" ? (
           <Button
             size="sm"
             variant="secondary"
@@ -99,7 +101,7 @@ export function LocalPlayer({
           >
             Try again
           </Button>
-        ) : (
+        ) : action === "save" ? (
           <Button
             size="sm"
             variant="secondary"
@@ -108,7 +110,7 @@ export function LocalPlayer({
           >
             Save to downloads
           </Button>
-        )}
+        ) : null}
       </div>
     );
   }

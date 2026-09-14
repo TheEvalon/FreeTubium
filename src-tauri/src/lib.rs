@@ -158,6 +158,7 @@ pub fn run() {
             auth::use_browser_cookies,
             auth::clear_youtube_auth,
             watch::prepare_stream,
+            watch::play_local_file,
             watch::stop_stream,
             player_server::player_page_url
         ])

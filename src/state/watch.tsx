@@ -14,6 +14,7 @@ import {
   onPrepareError,
   onPrepareProgress,
   onPrepareReady,
+  playLocalFile,
   playerPageUrl,
   prepareStream,
   stopStream,
@@ -45,6 +46,12 @@ export interface WatchItem {
   title: string;
   thumbnail: string | null;
   duration: number | null;
+  /**
+   * Set when the item is a finished download rather than something to fetch.
+   * Those play straight off disk, so nothing is extracted and nothing is
+   * deleted when they are released.
+   */
+  filePath: string | null;
 }
 
 export type PrepareState =
@@ -66,6 +73,8 @@ interface WatchContextValue {
   analyzeError: string | null;
   /** Analyses a link and replaces the queue with it. */
   open: (url?: string) => Promise<void>;
+  /** Plays a finished download, with no analysis and no extraction. */
+  openFile: (file: WatchFile) => void;
   queue: WatchItem[];
   index: number;
   current: WatchItem | null;
@@ -88,6 +97,15 @@ interface WatchContextValue {
   retryLocal: () => void;
 }
 
+/** A finished download, as the history screen knows it. */
+export interface WatchFile {
+  path: string;
+  title: string;
+  thumbnail?: string | null;
+  /** Page the file came from, so it can still be re-downloaded or saved. */
+  url?: string;
+}
+
 const WatchContext = createContext<WatchContextValue | null>(null);
 
 function itemsFrom(result: AnalyzeResult, fallbackUrl: string): WatchItem[] {
@@ -101,6 +119,7 @@ function itemsFrom(result: AnalyzeResult, fallbackUrl: string): WatchItem[] {
         title: entry.title,
         thumbnail: entry.thumbnail,
         duration: entry.duration,
+        filePath: null,
       };
     });
   }
@@ -116,6 +135,7 @@ function itemsFrom(result: AnalyzeResult, fallbackUrl: string): WatchItem[] {
       title: video.title,
       thumbnail: video.thumbnail,
       duration: video.duration,
+      filePath: null,
     },
   ];
 }
@@ -266,6 +286,30 @@ export function WatchProvider({ children }: { children: ReactNode }) {
     [releaseSession, settings.watchQuality],
   );
 
+  /** Registers a finished download with the loopback server so it can play. */
+  const startFile = useCallback(
+    async (filePath: string) => {
+      const attempt = ++prepareId.current;
+      releaseSession();
+      setPrepare({ status: "preparing", percent: 0 });
+
+      try {
+        const ready = await playLocalFile(filePath);
+        if (prepareId.current !== attempt) {
+          void stopStream(ready.sessionId).catch(() => undefined);
+          return;
+        }
+        session.current = ready.sessionId;
+        setPrepare({ status: "ready", url: ready.url, path: ready.path });
+      } catch (error) {
+        if (prepareId.current === attempt) {
+          setPrepare({ status: "error", message: shortErrorMessage(error) });
+        }
+      }
+    },
+    [releaseSession],
+  );
+
   // Drive preparation from whichever item and engine are current.
   useEffect(() => {
     if (!current) {
@@ -280,8 +324,12 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       setPrepare({ status: "idle" });
       return;
     }
+    if (current.filePath) {
+      void startFile(current.filePath);
+      return;
+    }
     void startPreparing(current);
-  }, [current, engine, releaseSession, startPreparing]);
+  }, [current, engine, releaseSession, startFile, startPreparing]);
 
   // Stop any running ffmpeg when the app closes the page.
   useEffect(() => releaseSession, [releaseSession]);
@@ -321,6 +369,32 @@ export function WatchProvider({ children }: { children: ReactNode }) {
     },
     [url],
   );
+
+  const openFile = useCallback((file: WatchFile) => {
+    // Cancels an analysis still in flight, which would otherwise land later and
+    // replace the file the user just asked for.
+    analyzeAttempt.current += 1;
+    setAnalyzing(false);
+    setAnalyzeError(null);
+    setUrl("");
+
+    const item: WatchItem = {
+      key: `file:${file.path}`,
+      // The page it came from when that is known, so it can still be saved.
+      url: file.url || file.path,
+      // Left null so the item stays with the local player: the point of opening
+      // a download is to play that file, not to stream it again.
+      videoId: null,
+      title: file.title,
+      thumbnail: file.thumbnail ?? null,
+      duration: null,
+      filePath: file.path,
+    };
+    setQueue([item]);
+    setIndex(0);
+    setEngines({ [item.key]: "local" });
+    setPlaylistTitle(null);
+  }, []);
 
   const playAt = useCallback(
     (target: number) => {
@@ -370,8 +444,12 @@ export function WatchProvider({ children }: { children: ReactNode }) {
   }, [current]);
 
   const retryLocal = useCallback(() => {
-    if (current) void startPreparing(current);
-  }, [current, startPreparing]);
+    if (!current) return;
+    // Worth retrying for a file too: the usual failure is that it was moved or
+    // deleted since the download finished, which the user can put right.
+    if (current.filePath) void startFile(current.filePath);
+    else void startPreparing(current);
+  }, [current, startFile, startPreparing]);
 
   const value = useMemo(
     () => ({
@@ -380,6 +458,7 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       analyzing,
       analyzeError,
       open,
+      openFile,
       queue,
       index,
       current,
@@ -401,6 +480,7 @@ export function WatchProvider({ children }: { children: ReactNode }) {
       analyzing,
       analyzeError,
       open,
+      openFile,
       queue,
       index,
       current,

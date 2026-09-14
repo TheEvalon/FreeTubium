@@ -46,13 +46,14 @@ operating system's own webview instead of shipping a browser.
 - Live progress, transfer speed, and ETA per download
 - Pause, resume, cancel, and retry — pausing resumes from the partial file instead of starting over
 - Optional per-download speed limit
-- Searchable history that survives restarts, with re-download and reveal-in-folder
+- Searchable history that survives restarts, with watch, re-download, and reveal-in-folder
 
 **Watching**
 - A **Watch** page that plays videos and playlists inside the app, without opening a browser
 - Playlists become a play queue that auto-advances, with a click-to-jump list
 - Videos play in YouTube's own player; anything it refuses — age-restricted, members-only, or embedding-disabled — falls back per item to a local player that extracts the video with the bundled `yt-dlp`
 - Save whatever is playing to the download queue in one click
+- Play a finished download straight from the History page, with nothing to fetch
 
 **YouTube account (optional)**
 - Sign in inside the app, read cookies from an installed browser, or import a `cookies.txt`
@@ -266,6 +267,12 @@ platform.
 division of labour as the download path. That is not just for consistency: the
 Linux ffmpeg build is statically linked, which leaves it unable to resolve
 hostnames, and it crashes outright if handed an http URL.
+
+**Already-downloaded files** need none of that. Completed entries on the History
+page have a **Watch** action that plays the file from disk, so nothing is fetched
+and nothing is extracted. It still goes over the loopback server, for the same
+reason prepared files do, and releasing it stops the server serving the file
+without deleting your download.
 
 ## Using a YouTube account
 
